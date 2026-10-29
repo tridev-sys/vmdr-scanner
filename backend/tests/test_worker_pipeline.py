@@ -137,3 +137,24 @@ def test_missing_binary_marks_run_failed_without_resolving(pipeline, monkeypatch
         assert run.status == RunStatus.FAILED
         assert "not found" in run.error
     config.get_settings.cache_clear()
+
+
+def test_orphaned_running_run_is_recovered_on_startup(pipeline):
+    from sqlmodel import Session
+    from app.models import RunStatus, ScanRun
+    import app.worker as worker
+
+    importlib.reload(worker)  # bind worker.engine to this test's database
+    db = pipeline["db"]
+    run_id = _queue_run(db)
+    with Session(db.engine) as s:
+        run = s.get(ScanRun, run_id)
+        run.status = RunStatus.RUNNING
+        s.add(run)
+        s.commit()
+
+    assert worker.recover_orphaned_runs() == 1
+    with Session(db.engine) as s:
+        run = s.get(ScanRun, run_id)
+        assert run.status == RunStatus.FAILED and "interrupted" in run.error
+    assert worker.recover_orphaned_runs() == 0

@@ -92,10 +92,31 @@ def _next_queued_run_id() -> int | None:
         return run.id if run else None
 
 
+def recover_orphaned_runs() -> int:
+    """Mark runs left RUNNING by a previous worker process as FAILED.
+
+    A RUNNING ALL-scope row would otherwise block every future full scan.
+    """
+    recovered = 0
+    with Session(engine) as session:
+        for run in session.exec(select(ScanRun).where(ScanRun.status == RunStatus.RUNNING)).all():
+            run.status = RunStatus.FAILED
+            run.error = "interrupted: worker restarted before the run finished"
+            run.finished_at = utcnow()
+            session.add(run)
+            session.commit()
+            log_line(session, run.id, run.error, "WARN")
+            recovered += 1
+        set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)
+    return recovered
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = get_settings()
     init_db()
+    if recover_orphaned_runs():
+        logger.warning("marked orphaned RUNNING run(s) as FAILED")
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
