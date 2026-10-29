@@ -13,6 +13,6 @@ frontend/dist/
 .env
 deploy/vmdr.env
 
-# Claude Code per-machine state (worktrees, job files)
-.claude/worktrees/
+# Claude Code per-machine state (settings, worktrees, job files)
+.claude/
 frontend/*.tsbuildinfo
