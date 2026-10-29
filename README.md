@@ -82,12 +82,13 @@ Run tests: `cd backend && python -m pytest -q`
 Requirements: a Linux host with Docker, and Nuclei installed (`/usr/local/bin/nuclei`).
 
 ```bash
-cp .env.example .env                     # set VMDR_API_KEY, NUCLEI_TEMPLATES_DIR, port
+# .env already holds the defaults; set VMDR_API_KEY and HTTP_PORT if needed
 docker compose up -d --build
 ```
 
 - The dashboard is at `http://<host>:8080`.
-- The Nuclei binary is mounted read-only from the host. The template cache is mounted from `NUCLEI_TEMPLATES_DIR` so `nuclei -update-templates` results persist.
+- Nuclei is baked into the backend image at `NUCLEI_VERSION` (pinned in `.env`). Templates live in the named volume `vmdr-nuclei-templates`, and data (SQLite and scan output) lives in `vmdr-data`. Both survive `docker compose down` and rebuilds; only `docker compose down -v` removes them.
+- Containers share the `vmdr-net` network. Only the frontend publishes a host port.
 - Seed the initial endpoints once: `docker compose exec web-api python -m app.seed`.
 
 ## Deployment option B: native Ubuntu with systemd
