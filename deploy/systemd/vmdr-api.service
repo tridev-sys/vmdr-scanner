@@ -1,0 +1,26 @@
+# Native alternative to the compose `web-api` service.
+# Install: copy to /etc/systemd/system/, then: systemctl daemon-reload && systemctl enable --now vmdr-api
+[Unit]
+Description=VMDR API (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vmdr
+Group=vmdr
+WorkingDirectory=/opt/vmdr/backend
+EnvironmentFile=/etc/vmdr/vmdr.env
+ExecStart=/opt/vmdr/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vmdr
+
+[Install]
+WantedBy=multi-user.target

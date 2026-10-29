@@ -1,0 +1,30 @@
+# Native alternative to the compose `scanner-worker` service (24x7 scheduler + Nuclei runner).
+# Install: copy to /etc/systemd/system/, then: systemctl daemon-reload && systemctl enable --now vmdr-worker
+[Unit]
+Description=VMDR scanner worker (Nuclei scheduler)
+After=network-online.target vmdr-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vmdr
+Group=vmdr
+WorkingDirectory=/opt/vmdr/backend
+EnvironmentFile=/etc/vmdr/vmdr.env
+Environment=HOME=/var/lib/vmdr/home
+ExecStart=/opt/vmdr/venv/bin/python -m app.worker
+# SIGTERM lets the loop finish its current step; a scan in progress gets up to 60s before SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=always
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vmdr
+
+[Install]
+WantedBy=multi-user.target

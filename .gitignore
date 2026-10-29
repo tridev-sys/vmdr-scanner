@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+backend/data/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Secrets and local config
+.env
+deploy/vmdr.env
+
+# Claude Code per-machine state (worktrees, job files)
+.claude/worktrees/
+frontend/*.tsbuildinfo
