@@ -38,6 +38,7 @@ services:
         limits:
           cpus: "${VMDR_API_CPUS:-1.0}"
           memory: ${VMDR_API_MEMORY:-512M}
+          pids: 200
         reservations:
           cpus: "0.25"
           memory: 128M
@@ -68,6 +69,7 @@ services:
         limits:
           cpus: "${VMDR_WORKER_CPUS:-2.0}"
           memory: ${VMDR_WORKER_MEMORY:-2G}
+          pids: 512
         reservations:
           cpus: "0.5"
           memory: 512M
@@ -85,6 +87,7 @@ services:
         limits:
           cpus: "${VMDR_FRONTEND_CPUS:-0.5}"
           memory: ${VMDR_FRONTEND_MEMORY:-128M}
+          pids: 100
         reservations:
           cpus: "0.1"
           memory: 32M
