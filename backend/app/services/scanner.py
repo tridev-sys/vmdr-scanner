@@ -2,6 +2,7 @@
 
 import logging
 import subprocess
+import time
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -14,6 +15,7 @@ from app.services.nuclei import build_command, parse_jsonl
 from app.services.webhooks import dispatch_alerts
 
 logger = logging.getLogger(__name__)
+HEARTBEAT_INTERVAL_S = 15
 
 
 def log_line(session: Session, run_id: int | None, message: str, level: str = "INFO") -> None:
@@ -98,12 +100,19 @@ def execute_run(run_id: int) -> None:
         try:
             with nuclei_log.open("w", encoding="utf-8") as fh:
                 proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT)
-                try:
-                    returncode = proc.wait(timeout=settings.nuclei_run_timeout_s)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                    timed_out = True
+                deadline = time.monotonic() + settings.nuclei_run_timeout_s
+                # Wait in short slices and refresh the heartbeat, so long scans don't look offline.
+                while True:
+                    try:
+                        returncode = proc.wait(timeout=HEARTBEAT_INTERVAL_S)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline:
+                            proc.kill()
+                            proc.wait()
+                            timed_out = True
+                            break
+                        set_worker_state(session, status=WorkerStatus.SCANNING, current_run_id=run.id)
         except FileNotFoundError:
             _fail(session, run, f"nuclei binary not found at {settings.nuclei_bin}")
             set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)
