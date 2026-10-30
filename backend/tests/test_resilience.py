@@ -345,3 +345,76 @@ def test_purge_removes_reports_older_than_retention(pipeline):
         assert purge_expired(s) == 1
         left = [r.file_name for r in s.exec(select(Report)).all()]
     assert left == ["new.json"] and not old_file.exists() and new_file.exists()
+
+
+def test_disjoint_scans_run_at_the_same_time(pipeline, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlmodel import Session, select
+    from app.models import ScanRun, Target
+    from app.services.targets import add_targets
+
+    db, scanner = pipeline["db"], pipeline["scanner"]
+    with Session(db.engine) as s:
+        add_targets(s, urls=["https://kai.buckleconsult.com", "https://clinic.heykoala.ai"])
+        ids = {t.host: t.id for t in s.exec(select(Target)).all()}
+    _sleeping_nuclei(pipeline["tmp"], monkeypatch)
+    run_a = _queue_run(db, scope="TARGET", target_id=ids["kai.buckleconsult.com"])
+    run_b = _queue_run(db, scope="TARGET", target_id=ids["clinic.heykoala.ai"])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fut_a = pool.submit(scanner.execute_run, run_a)
+        fut_b = pool.submit(scanner.execute_run, run_b)
+        pid_a = _wait_for_pid(pipeline["tmp"] / "scans" / f"run-{run_a}")
+        pid_b = _wait_for_pid(pipeline["tmp"] / "scans" / f"run-{run_b}")
+        assert _process_alive(pid_a) and _process_alive(pid_b), "both scans should be running together"
+        with Session(db.engine) as s:
+            for rid in (run_a, run_b):
+                run = s.get(ScanRun, rid)
+                run.cancel_requested = True
+                s.add(run)
+            s.commit()
+        fut_a.result(timeout=60)
+        fut_b.result(timeout=60)
+    scanner.shutdown_event.clear()
+
+
+def test_api_refuses_scan_of_target_already_being_scanned(pipeline, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlmodel import Session, select
+    from app.main import app
+    from app.models import RunStatus, ScanRun, Target
+    from app.services.targets import add_targets
+
+    db = pipeline["db"]
+    with Session(db.engine) as s:
+        add_targets(s, urls=["https://kai.buckleconsult.com"])
+        target_id = s.exec(select(Target.id)).first()
+    run_id = _queue_run(db, scope="TARGET", target_id=target_id)
+    with Session(db.engine) as s:
+        run = s.get(ScanRun, run_id)
+        run.status = RunStatus.RUNNING
+        s.add(run)
+        s.commit()
+
+    client = TestClient(app)
+    resp = client.post("/api/scans/trigger", json={"scope": "targets", "target_ids": [target_id], "preset": "quick"})
+    assert resp.status_code == 409
+    assert f"run {run_id}" in resp.json()["detail"]
+
+
+def test_run_with_no_reachable_targets_still_writes_report(pipeline, monkeypatch):
+    from sqlmodel import Session, select
+    from app.models import Report, RunStatus, ScanRun
+    from app.services.probe import ProbeResult
+    from app.services.targets import add_targets
+
+    db, scanner = pipeline["db"], pipeline["scanner"]
+    with Session(db.engine) as s:
+        add_targets(s, urls=["https://kai.buckleconsult.com"])
+    monkeypatch.setattr(scanner, "probe_urls", lambda urls: [ProbeResult(u, False, error="timeout") for u in urls])
+    run_id = _queue_run(db)
+    scanner.execute_run(run_id)
+    with Session(db.engine) as s:
+        assert s.get(ScanRun, run_id).status == RunStatus.COMPLETED
+        report = s.exec(select(Report).where(Report.run_id == run_id)).one()
+        assert report.targets_count == 1 and report.findings_count == 0

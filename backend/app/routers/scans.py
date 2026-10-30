@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import RunScope, RunStatus, ScanRun, Target, TargetStatus, WorkerState, utcnow
 from app.schemas import ScanRunOut, ScanStatus, ScanTrigger
+from app.services.concurrency import conflicting_run
 from app.services.presets import PRESETS
 from app.services.scanner import log_line, set_worker_state
 from app.services.status import get_scan_status, run_out
@@ -54,6 +55,18 @@ def trigger_scan(payload: ScanTrigger, session: Session = Depends(get_session)) 
         if pending:
             raise HTTPException(status.HTTP_409_CONFLICT, f"full scan {pending.id} already {pending.status}")
         scope, target_id = RunScope.ALL, None
+
+    # Overlapping scans would write the same findings at once, so the request is refused, not queued.
+    new_targets = set(target_ids or []) if scope == RunScope.TARGETS else (
+        {target_id} if scope == RunScope.TARGET else set(session.exec(
+            select(Target.id).where(Target.status == TargetStatus.ACTIVE)).all())
+    )
+    clash = conflicting_run(session, new_targets)
+    if clash is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"run {clash.id} ({clash.status}) already covers some of these targets; scan them after it finishes",
+        )
 
     run = ScanRun(scope=scope, target_id=target_id, target_ids=target_ids,
                   severities=",".join(severities), requested_by="api", cve_years=cve_years,

@@ -138,12 +138,12 @@ def test_api_targets_crud_and_scan_trigger(env):
         r = client.post("/api/scans/trigger", json={"scope": "target", "target_id": target_id})
         assert r.status_code == 202 and r.json()["status"] == "QUEUED"
 
-        # Only one full scan may be queued at a time.
-        assert client.post("/api/scans/trigger", json={"scope": "all"}).status_code == 202
-        assert client.post("/api/scans/trigger", json={"scope": "all"}).status_code == 409
+        # A full scan covers every active target, so it is refused while the target run is queued.
+        full = client.post("/api/scans/trigger", json={"scope": "all"})
+        assert full.status_code == 409 and f"run {r.json()['id']}" in full.json()["detail"]
 
         status = client.get("/api/scans/status").json()
-        assert status["queue_length"] == 2
+        assert status["queue_length"] == 1
         assert status["state"] == "OFFLINE"  # no worker heartbeat in tests
 
         stats = client.get("/api/stats").json()

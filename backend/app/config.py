@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     scan_parallel_chunks: int = 3
     # Newest CVE years are scanned first (0 disables). Templates live under <dir>/**/cves/<year>.
     recent_cve_years: int = 2
+    # Scans that may run at the same time. Runs with overlapping targets never run together.
+    max_concurrent_runs: int = 5
     # Scan reports older than this are deleted by the worker.
     report_retention_days: int = 5
     nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"

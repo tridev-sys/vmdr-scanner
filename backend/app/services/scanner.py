@@ -145,7 +145,9 @@ def execute_run(run_id: int) -> None:
             _finish(session, run_id, RunStatus.FAILED, f"internal error: {type(exc).__name__}: {exc}"[:2000])
             log_line(session, run_id, f"internal error: {type(exc).__name__}: {exc}", "ERROR")
         finally:
-            set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)
+            # Do not reset the shared worker state here: other runs may still be going.
+            # The worker loop sets IDLE once no run is active.
+            pass
 
 
 def _run_passes(passes, timeout_s: int, should_stop) -> ProcessOutcome:
@@ -161,11 +163,23 @@ def _run_passes(passes, timeout_s: int, should_stop) -> ProcessOutcome:
     return last
 
 
+def _report_safely(session: Session, run_id: int) -> None:
+    """Write the run's report. A failure is logged and never fails the run."""
+    try:
+        from app.services.reports import write_report
+        report = write_report(session, session.get(ScanRun, run_id))
+        log_line(session, run_id, f"Report ready: {report.file_name} ({report.findings_count} findings)")
+    except Exception as exc:
+        logger.exception("report generation failed for run %s", run_id)
+        log_line(session, run_id, f"report generation failed: {exc}", "WARN")
+
+
 def _execute_started(session: Session, run_id: int, target_ids: list[int], settings) -> None:
     run = session.get(ScanRun, run_id)
     if not target_ids:
         _finish(session, run_id, RunStatus.COMPLETED, None)
         log_line(session, run_id, "No ACTIVE targets matched; nothing to scan.", "WARN")
+        _report_safely(session, run_id)
         return
 
     log_line(session, run_id, f"Probing {len(target_ids)} ACTIVE target(s)")
@@ -185,6 +199,7 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
     if not reachable_ids:
         _finish(session, run_id, RunStatus.COMPLETED, None)
         log_line(session, run_id, "No reachable targets; nothing scanned, no findings resolved.", "WARN")
+        _report_safely(session, run_id)
         return
 
     targets = [session.get(Target, tid) for tid in reachable_ids]
@@ -339,13 +354,7 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     if ok:
         # A report is written for every completed run, even when nothing was found.
-        try:
-            from app.services.reports import write_report
-            report = write_report(session, session.get(ScanRun, run_id))
-            log_line(session, run_id, f"Report ready: {report.file_name} ({report.findings_count} findings)")
-        except Exception as exc:  # a report failure must never fail the scan
-            logger.exception("report generation failed for run %s", run_id)
-            log_line(session, run_id, f"report generation failed: {exc}", "WARN")
+        _report_safely(session, run_id)
 
     if stats.alerts:
         for err in dispatch_alerts(session, stats.alerts):

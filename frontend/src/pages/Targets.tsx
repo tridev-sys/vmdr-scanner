@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Archive, Pause, Play, Plus, Radar, Search, Upload } from "lucide-react";
+import { Archive, Pause, Play, Plus, Search, ShoppingCart, Upload } from "lucide-react";
 import { Button, Card, EmptyState, ErrorText, Input, Modal, RiskBadge, TargetStatusBadge } from "../components/ui";
 import {
   api,
@@ -11,6 +11,7 @@ import {
   type Target,
   type TargetPage,
 } from "../lib/api";
+import { addToCart, useCart } from "../lib/cart";
 
 const PAGE_SIZE = 25;
 
@@ -185,6 +186,8 @@ export default function TargetsPage() {
   const [modal, setModal] = useState<"add" | "bulk" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cart = useCart();
+  const cartIds = new Set(cart.map((item) => item.id));
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
@@ -311,7 +314,9 @@ export default function TargetsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {data.items.map((t: Target) => (
+                {data.items.map((t: Target) => {
+                  const inCart = cartIds.has(t.id);
+                  return (
                   <tr key={t.id} className="hover:bg-slate-50/60">
                     <td className="px-4 py-3">
                       <div className="font-medium">{t.host}</div>
@@ -334,9 +339,11 @@ export default function TargetsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" title="Scan this target now" disabled={t.status !== "ACTIVE"}
-                          onClick={() => mutate(() => api.post("/scans/trigger", { scope: "target", target_id: t.id }), `Queued scan for ${t.host}`)}>
-                          <Radar size={14} /> Scan
+                        <Button variant="ghost" className="whitespace-nowrap"
+                          title={t.status !== "ACTIVE" ? "Only ACTIVE targets can be scanned" : inCart ? "Already in the scanner cart" : "Add to the scanner cart"}
+                          disabled={t.status !== "ACTIVE" || inCart}
+                          onClick={() => addToCart({ id: t.id, url: t.url, host: t.host })}>
+                          <ShoppingCart size={14} /> {inCart ? "In cart" : "Move to scanner cart"}
                         </Button>
                         {t.status === "ACTIVE" ? (
                           <Button variant="ghost" title="Pause scanning" onClick={() => mutate(() => api.patch(`/targets/${t.id}`, { status: "PAUSED" }))}>
@@ -353,7 +360,8 @@ export default function TargetsPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

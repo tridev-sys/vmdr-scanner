@@ -161,6 +161,8 @@ class ScanStatus(BaseModel):
     current_run: ScanRunOut | None
     # Targets the current run is scanning (or probing). Empty when idle.
     active_targets: list[ActiveTarget] = []
+    # Every RUNNING scan. Up to VMDR_MAX_CONCURRENT_RUNS run at once, on disjoint targets.
+    active_runs: list[ScanRunOut] = []
     # Server clock, so the UI can show an elapsed timer that is not skewed by the browser clock.
     server_time: datetime | None = None
     live_findings: int | None = None

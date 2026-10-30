@@ -12,6 +12,7 @@ the same across docker-compose containers (shared volume) and systemd on one hos
 import logging
 import signal
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -24,6 +25,7 @@ from app.db import engine, init_db
 from app.models import RunScope, RunStatus, ScanRun, WorkerState, WorkerStatus, utcnow
 from app.services import nuclei
 from app.services import scanner as scanner_mod
+from app.services.concurrency import busy_target_ids, run_target_ids
 from app.services.process import kill_stale_group
 from app.services.scanner import MAX_RUN_ATTEMPTS, execute_run, log_line, set_worker_state
 
@@ -91,12 +93,17 @@ def run_template_update() -> None:
             log_line(session, None, f"Template update failed: {output[-500:]}", "ERROR")
 
 
-def _next_queued_run_id() -> int | None:
+def _next_startable_run_id(claimed: set[int]) -> int | None:
+    """The oldest QUEUED run whose targets do not overlap a running or already-claimed run."""
     with Session(engine) as session:
-        run = session.exec(
-            select(ScanRun).where(ScanRun.status == RunStatus.QUEUED).order_by(ScanRun.id)
-        ).first()
-        return run.id if run else None
+        busy = busy_target_ids(session, claimed)
+        for run in session.exec(select(ScanRun).where(ScanRun.status == RunStatus.QUEUED).order_by(ScanRun.id)).all():
+            if run.id in claimed:
+                continue
+            if run_target_ids(session, run) & busy:
+                continue
+            return run.id
+    return None
 
 
 def recover_orphaned_runs() -> int:
@@ -164,6 +171,8 @@ def main() -> None:
                 settings.full_scan_cron, settings.template_update_hours)
 
     last_purge = 0.0
+    pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_runs, thread_name_prefix="scan")
+    active: dict[int, Future] = {}
     while not stop.is_set():
         if time.monotonic() - last_purge > 3600:
             last_purge = time.monotonic()
@@ -176,24 +185,35 @@ def main() -> None:
             except Exception:
                 logger.exception("report purge failed")
         try:
-            with Session(engine) as session:
-                state = session.get(WorkerState, 1)
-                template_wanted = state is not None and (state.template_update_requested or _template_due(state))
-            if template_wanted:
-                run_template_update()
-                continue
+            for run_id in [rid for rid, fut in active.items() if fut.done()]:
+                fut = active.pop(run_id)
+                if fut.exception() is not None:
+                    logger.error("run %s crashed: %s", run_id, fut.exception())
 
-            run_id = _next_queued_run_id()
-            if run_id is not None:
-                execute_run(run_id)
-                continue
+            # Templates change only when no scan is running, so a sync never swaps them under a scan.
+            if not active:
+                with Session(engine) as session:
+                    state = session.get(WorkerState, 1)
+                    template_wanted = state is not None and (state.template_update_requested or _template_due(state))
+                if template_wanted:
+                    run_template_update()
+                    continue
 
-            with Session(engine) as session:
-                set_worker_state(session, status=WorkerStatus.IDLE)
+            while len(active) < settings.max_concurrent_runs:
+                run_id = _next_startable_run_id(set(active))
+                if run_id is None:
+                    break
+                active[run_id] = pool.submit(execute_run, run_id)
+
+            if not active:
+                with Session(engine) as session:
+                    set_worker_state(session, status=WorkerStatus.IDLE)
         except Exception:  # keep the daemon alive; the error is in the log
             logger.exception("worker loop error")
         stop.wait(settings.worker_poll_seconds)
 
+    # Scans stop promptly on shutdown (shared event), so this wait is short.
+    pool.shutdown(wait=True)
     scheduler.shutdown(wait=False)
     with Session(engine) as session:
         set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)

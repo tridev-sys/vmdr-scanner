@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Activity, AlertTriangle, CheckCircle2, Globe, Loader2, RefreshCw, Play, ShieldAlert, Shuffle, Square, TrendingUp } from "lucide-react";
-import { Card, Button, ErrorText } from "../components/ui";
+import { Activity, AlertTriangle, CheckCircle2, Globe, Loader2, Minus, Plus, RefreshCw, Play, Search, ShieldAlert, Shuffle, ShoppingCart, Square, TrendingUp, X } from "lucide-react";
+import { Card, Button, ErrorText, Input, Modal } from "../components/ui";
 import {
   api,
   cancelScanRun,
@@ -18,8 +18,10 @@ import {
   type ScanPreset,
   type ScanRun,
   type Stats,
+  type Target,
   type TargetPage,
 } from "../lib/api";
+import { addToCart, clearCart, removeFromCart, useCart } from "../lib/cart";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const BAR_COLOR: Record<string, string> = {
@@ -150,8 +152,159 @@ function ElapsedTimer({ startedAt, offsetMs }: { startedAt: number; offsetMs: nu
   );
 }
 
+/** Review panel for the scanner cart: edit the cart, pick a preset, and scan the cart as one run. */
+function ScanCartModal({ onClose, onScanned }: { onClose: () => void; onScanned: (message: string) => void }) {
+  const cart = useCart();
+  const [preset, setPreset] = useState<ScanPreset>(DEFAULT_PRESET);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Target[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Debounced search of ACTIVE targets while the picker is open. Stale responses are ignored.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const page = await api.get<TargetPage>(`/targets?status=ACTIVE&q=${encodeURIComponent(q.trim())}&page_size=20`);
+        if (!cancelled) {
+          setResults(page.items);
+          setSearchError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setSearchError((e as Error).message);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pickerOpen, q]);
+
+  async function scanCart() {
+    if (cart.length === 0) return;
+    setScanning(true);
+    setError(null);
+    try {
+      const run = await triggerTargetsScan(cart.map((item) => item.id), preset);
+      clearCart();
+      const label = PRESET_OPTIONS.find((o) => o.value === preset)?.label ?? preset;
+      onScanned(`Queued run #${run.id} over ${cart.length} target${cart.length === 1 ? "" : "s"} (${label}).`);
+      onClose();
+    } catch (e) {
+      // The cart is left unchanged so the user can adjust it and retry.
+      setError((e as Error).message);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  return (
+    <Modal title="Scanner cart" onClose={onClose} wide>
+      <div className="space-y-4">
+        {cart.length === 0 ? (
+          <p className="text-sm text-slate-500">The cart is empty. Use “Move to scanner cart” on the Targets page or add targets below.</p>
+        ) : (
+          <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+            {cart.map((item) => (
+              <li key={item.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium" title={item.url}>{item.url}</div>
+                  <div className="truncate text-xs text-slate-500">{item.host}</div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button variant="ghost" aria-label={`Remove ${item.host} from cart`} title="Remove from cart"
+                    onClick={() => removeFromCart(item.id)}>
+                    <Minus size={14} />
+                  </Button>
+                  <Button variant="ghost" aria-label="Add more targets" title="Add more targets"
+                    onClick={() => setPickerOpen(true)}>
+                    <Plus size={14} />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {cart.length === 0 && !pickerOpen && (
+          <Button variant="secondary" onClick={() => setPickerOpen(true)}><Plus size={14} /> Add targets</Button>
+        )}
+
+        {pickerOpen && (
+          <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search size={15} className="absolute left-3 top-2.5 text-slate-400" />
+                <Input className="pl-9" placeholder="Search ACTIVE targets by URL" value={q}
+                  onChange={(e) => setQ(e.target.value)} autoFocus />
+              </div>
+              <Button variant="ghost" aria-label="Close picker" onClick={() => setPickerOpen(false)}><X size={14} /></Button>
+            </div>
+            <ErrorText error={searchError} />
+            {!searchError && !searching && results.length === 0 && (
+              <p className="text-sm text-slate-500">No ACTIVE targets match.</p>
+            )}
+            <ul className="max-h-56 divide-y divide-slate-200 overflow-y-auto">
+              {results.map((t) => {
+                const inCart = cart.some((item) => item.id === t.id);
+                return (
+                  <li key={t.id} className="flex items-center justify-between gap-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium" title={t.url}>{t.url}</div>
+                      <div className="truncate text-xs text-slate-500">{t.host}</div>
+                    </div>
+                    <Button variant="secondary" className="shrink-0" disabled={inCart}
+                      onClick={() => addToCart({ id: t.id, url: t.url, host: t.host })}>
+                      {inCart ? "In cart" : <><Plus size={14} /> Add</>}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        <ErrorText error={error} />
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="whitespace-nowrap">Scan preset</span>
+            <select
+              className="max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
+              value={preset}
+              onChange={(e) => setPreset(e.target.value as ScanPreset)}
+              disabled={scanning}
+              aria-label="Scan preset for cart scan"
+            >
+              {PRESET_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={clearCart} disabled={cart.length === 0 || scanning}>Clear cart</Button>
+            <Button onClick={scanCart} disabled={cart.length === 0 || scanning}>
+              {scanning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Scan cart
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function LiveScanPanel() {
   const [snap, setSnap] = useState<{ status: LiveScanStatus; offsetMs: number } | null>(null);
+  const cart = useCart();
+  const [cartOpen, setCartOpen] = useState(false);
   const [pollError, setPollError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -319,6 +472,9 @@ function LiveScanPanel() {
           {sampling ? <Loader2 size={14} className="animate-spin" /> : <Shuffle size={14} />}
           Scan {SAMPLE_SIZE} random targets
         </Button>
+        <Button variant="secondary" onClick={() => setCartOpen(true)}>
+          <ShoppingCart size={14} /> Cart ({cart.length})
+        </Button>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <span className="whitespace-nowrap">Scan preset</span>
           <select
@@ -337,6 +493,17 @@ function LiveScanPanel() {
       </div>
       <ErrorText error={sampleError} />
       <ErrorText error={pollError} />
+
+      {cartOpen && (
+        <ScanCartModal
+          onClose={() => setCartOpen(false)}
+          onScanned={(message) => {
+            setSampleError(null);
+            setSampleResult(message);
+            load();
+          }}
+        />
+      )}
 
       <div className="mt-5">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Actively scanning</h3>

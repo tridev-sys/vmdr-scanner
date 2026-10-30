@@ -77,6 +77,8 @@ def get_scan_status(session: Session, log_limit: int = 100) -> ScanStatus:
         heartbeat_at=state.heartbeat_at,
         current_run=run_out(current) if current else None,
         active_targets=_active_targets(session, current),
+        active_runs=[run_out(r) for r in session.exec(
+            select(ScanRun).where(ScanRun.status == RunStatus.RUNNING).order_by(ScanRun.id)).all()],
         server_time=now,
         live_findings=_count_lines(current.output_path) if current and current.status == RunStatus.RUNNING else None,
         queue_length=queue_length,
