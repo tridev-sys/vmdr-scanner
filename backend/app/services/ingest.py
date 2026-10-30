@@ -1,14 +1,21 @@
 """Deduplicate Nuclei findings into the Vulnerability table and resolve findings that disappear."""
 
 from collections import defaultdict
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from typing import TypeVar
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.config import get_settings
 from app.models import Target, Vulnerability, VulnStatus, utcnow
 from app.services.nuclei import Finding, match_target_host
 from app.utils import fingerprint, normalize_target_url
+
+# SQLite caps bound parameters per statement, so IN lists are split into chunks of this size.
+IN_CHUNK = 500
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -21,6 +28,11 @@ class IngestStats:
     unmatched: int = 0
     bad_lines: int = 0
     alerts: list[Vulnerability] = field(default_factory=list)
+
+
+def _chunks(items: Sequence[T], size: int = IN_CHUNK) -> Iterator[Sequence[T]]:
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
 
 
 def _match_target(f: Finding, by_url: dict[str, Target], by_host: dict[str, Target]) -> Target | None:
@@ -60,6 +72,9 @@ def ingest(
     """Upsert findings and, when `resolve` is True (run completed cleanly), age out missing ones.
 
     `resolve` is False for failed or timed-out runs, so a partial scan never marks findings as fixed.
+
+    Queries are batched: one SELECT loads every existing row whose fingerprint appears in this batch,
+    and one SELECT loads the open findings of all scanned targets. Everything else happens in memory.
     """
     now = utcnow()
     settings = get_settings()
@@ -71,6 +86,7 @@ def ingest(
     stats = IngestStats(bad_lines=bad_lines)
     seen: dict[int, set[str]] = defaultdict(set)
 
+    matched: list[tuple[Target, Finding, str]] = []
     for f in findings:
         target = _match_target(f, by_url, by_host)
         if target is None:
@@ -79,8 +95,17 @@ def ingest(
         stats.findings_total += 1
         fp = fingerprint(target.url, f.template_id, f.matcher_name)
         seen[target.id].add(fp)
+        matched.append((target, f, fp))
 
-        vuln = session.exec(select(Vulnerability).where(Vulnerability.fingerprint == fp)).first()
+    # One round trip per 500 fingerprints: load every existing row this batch can touch.
+    existing: dict[str, Vulnerability] = {}
+    for chunk in _chunks(list({fp for _, _, fp in matched})):
+        for vuln in session.exec(select(Vulnerability).where(col(Vulnerability.fingerprint).in_(chunk))).all():
+            existing[vuln.fingerprint] = vuln
+
+    touched: list[Vulnerability] = []
+    for target, f, fp in matched:
+        vuln = existing.get(fp)
         if vuln is None:
             vuln = Vulnerability(
                 fingerprint=fp,
@@ -93,7 +118,7 @@ def ingest(
                 tags=[],
             )
             _apply(vuln, f, run_id, now)
-            session.add(vuln)
+            existing[fp] = vuln  # a duplicate fingerprint later in this batch updates this row
             stats.new += 1
             if f.severity in ("critical", "high"):
                 stats.alerts.append(vuln)
@@ -104,19 +129,23 @@ def ingest(
                 stats.reopened += 1
             _apply(vuln, f, run_id, now)
             stats.updated += 1
-        session.add(vuln)
+        touched.append(vuln)
 
+    session.add_all(touched)
     session.flush()
 
     if resolve:
+        scanned_ids = list({t.id for t in targets})
+        open_by_target: dict[int, list[Vulnerability]] = defaultdict(list)
+        for chunk in _chunks(scanned_ids):
+            rows = session.exec(select(Vulnerability).where(
+                col(Vulnerability.target_id).in_(chunk), Vulnerability.status == VulnStatus.OPEN,
+            )).all()
+            for vuln in rows:
+                open_by_target[vuln.target_id].append(vuln)
+
         for target in targets:
-            open_vulns = session.exec(
-                select(Vulnerability).where(
-                    Vulnerability.target_id == target.id,
-                    Vulnerability.status == VulnStatus.OPEN,
-                )
-            ).all()
-            for vuln in open_vulns:
+            for vuln in open_by_target.get(target.id, []):
                 if vuln.fingerprint in seen[target.id]:
                     continue
                 vuln.missed_scans += 1
@@ -130,9 +159,7 @@ def ingest(
             session.add(target)
         session.flush()
         for target in targets:
-            open_count = len(session.exec(select(Vulnerability).where(
-                Vulnerability.target_id == target.id, Vulnerability.status == VulnStatus.OPEN,
-            )).all())
+            open_count = sum(1 for v in open_by_target.get(target.id, []) if v.status == VulnStatus.OPEN)
             target.last_open_findings = open_count
             target.last_result = "CLEAN" if open_count == 0 else "VULNERABLE"
             session.add(target)

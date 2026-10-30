@@ -10,9 +10,14 @@ services:
     image: vmdr-backend
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
     env_file: .env
+    environment:
+      VMDR_DATABASE_URL: "postgresql+psycopg://${VMDR_PG_USER}:${VMDR_PG_PASSWORD}@postgres:5432/${VMDR_PG_DB}"
     volumes:
       - vmdr-data:/data
     networks: [vmdr-edge, vmdr-egress]
+    depends_on:
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits: {cpus: "${API_CPUS}", memory: "${API_MEMORY}", pids: "${API_PIDS}"}
@@ -30,6 +35,8 @@ services:
     image: vmdr-backend
     command: ["python", "-m", "app.worker"]
     env_file: .env
+    environment:
+      VMDR_DATABASE_URL: "postgresql+psycopg://${VMDR_PG_USER}:${VMDR_PG_PASSWORD}@postgres:5432/${VMDR_PG_DB}"
     volumes:
       - vmdr-data:/data
       - vmdr-nuclei-templates:/home/vmdr/nuclei-templates
@@ -37,10 +44,28 @@ services:
     depends_on:
       web-api:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     stop_grace_period: 60s
     deploy:
       resources:
         limits: {cpus: "${WORKER_CPUS}", memory: "${WORKER_MEMORY}", pids: "${WORKER_PIDS}"}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "${VMDR_PG_DB}"
+      POSTGRES_USER: "${VMDR_PG_USER}"
+      POSTGRES_PASSWORD: "${VMDR_PG_PASSWORD}"
+    volumes:
+      - vmdr-pgdata:/var/lib/postgresql/data
+    networks: [vmdr-egress]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   web-frontend:
@@ -56,8 +81,9 @@ services:
 
 # Networks (separate on purpose):
 #   vmdr-edge    frontend <-> web-api only. The browser-facing side; the worker is not on it.
-#   vmdr-egress  web-api and scanner-worker. The worker needs outbound access to scan targets.
+#   vmdr-egress  web-api, scanner-worker and postgres. The worker needs outbound access to scan targets.
 #                The frontend is not on it, so it cannot reach the worker or the internet.
+#                Postgres publishes no port; only the two app services can reach it.
 networks:
   vmdr-edge:
     name: vmdr-edge
@@ -65,10 +91,13 @@ networks:
     name: vmdr-egress
 
 # Volumes (separate on purpose):
-#   vmdr-data                  SQLite database and scan output. Shared by web-api and scanner-worker.
+#   vmdr-data                  Scan files (and a SQLite database when VMDR_DATABASE_URL is sqlite). Shared by web-api and scanner-worker.
+#   vmdr-pgdata                PostgreSQL data directory. Only postgres mounts it.
 #   vmdr-nuclei-templates      Nuclei template cache. Only scanner-worker mounts it.
 volumes:
   vmdr-data:
     name: vmdr-data
+  vmdr-pgdata:
+    name: vmdr-pgdata
   vmdr-nuclei-templates:
     name: vmdr-nuclei-templates
