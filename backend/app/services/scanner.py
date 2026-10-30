@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.db import engine
 from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStatus, WorkerState, WorkerStatus, utcnow
 from app.services.ingest import ingest
-from app.services.nuclei import all_cve_dirs, build_command, parse_jsonl, recent_cve_dirs
+from app.services.nuclei import all_cve_dirs, build_command, generic_template_dirs, parse_jsonl, recent_cve_dirs
 from app.services.probe import probe_urls
 from app.services.process import ProcessOutcome, run_process
 from app.services.webhooks import dispatch_alerts
@@ -232,10 +232,12 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         window_dirs = recent_cve_dirs(root, window)
         if not window_dirs:
             log_line(session, run_id, f"No CVE templates found for the last {run.cve_years} year(s)", "WARN")
-        # CVE-only: a CVE window scans only CVE templates from that window. Non-CVE templates are
-        # not run (that second pass was thousands of templates and made quick scans take minutes).
-        spec = [("window", window_dirs, None)] if window_dirs else []
-        log_line(session, run_id, f"CVE-only scan: last {run.cve_years} year(s) {window}")
+        # CVE window: pass 1 runs CVE templates from the window. Pass 2 runs only the generic web
+        # vulnerability and exposure checks. The full non-CVE tree is not run (too slow for quick scans).
+        generic_dirs = generic_template_dirs(root)
+        spec = ([("window", window_dirs, None)] if window_dirs else []) + (
+            [("generic", generic_dirs, None)] if generic_dirs else [])
+        log_line(session, run_id, f"CVE window: last {run.cve_years} year(s) {window} + generic web checks")
     else:
         # Newest CVEs first: pass 1 runs the newest years, pass 2 runs the rest.
         recent_dirs = recent_cve_dirs(root, [utcnow().year - i for i in range(settings.recent_cve_years)])
@@ -336,6 +338,11 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     findings, bad = parse_jsonl(output_file)
     stats = ingest(session, run_id, targets, findings, bad, resolve=ok)
+    if ok and session.get(ScanRun, run_id).preset == "deep":
+        for target in targets:
+            target.last_deep_scanned_at = utcnow()
+            session.add(target)
+        session.commit()
 
     run = session.get(ScanRun, run_id)
     run.findings_count = stats.findings_total

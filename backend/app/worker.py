@@ -1,7 +1,7 @@
 """24x7 scanner daemon: `python -m app.worker`.
 
 Responsibilities:
-  * APScheduler: enqueue the daily full scan (cron) and flag template updates (interval).
+  * APScheduler: enqueue the daily rolling quick and deep batches (24h intervals) and flag template updates.
   * Template sync: `nuclei -update-templates` when due or requested from the API.
   * Queue consumer: pulls QUEUED ScanRuns from the database, one at a time.
 
@@ -16,7 +16,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlmodel import Session, select
 
@@ -27,6 +26,7 @@ from app.services import nuclei
 from app.services import scanner as scanner_mod
 from app.services.concurrency import busy_target_ids, run_target_ids
 from app.services.process import kill_stale_group
+from app.services.schedule import enqueue_rolling_batch
 from app.services.scanner import MAX_RUN_ATTEMPTS, execute_run, log_line, set_worker_state
 
 logger = logging.getLogger("vmdr.worker")
@@ -54,6 +54,24 @@ def enqueue_full_scan(requested_by: str = "scheduler") -> int | None:
         session.refresh(run)
         log_line(session, run.id, f"Queued full scan ({requested_by})")
         return run.id
+
+
+def enqueue_rolling_quick() -> int | None:
+    """Daily batch of the rolling quick scan (settings.rolling_preset, settings.rolling_cycle_days)."""
+    settings = get_settings()
+    with Session(engine) as session:
+        return enqueue_rolling_batch(session, settings.rolling_preset, settings.rolling_cycle_days)
+
+
+def enqueue_deep_batch() -> int | None:
+    """Daily batch of the deep scan (settings.deep_preset, settings.deep_cycle_days).
+
+    Only targets not scanned within deep_cycle_days are picked, so this is a no-op on most days.
+    """
+    settings = get_settings()
+    with Session(engine) as session:
+        return enqueue_rolling_batch(
+            session, settings.deep_preset, settings.deep_cycle_days, field="last_deep_scanned_at")
 
 
 def request_template_update() -> None:
@@ -157,9 +175,14 @@ def main() -> None:
 
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(
-        enqueue_full_scan,
-        CronTrigger.from_crontab(settings.full_scan_cron, timezone="UTC"),
-        id="full-scan", max_instances=1, coalesce=True,
+        enqueue_rolling_quick,
+        IntervalTrigger(hours=24),
+        id="rolling-quick", max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        enqueue_deep_batch,
+        IntervalTrigger(hours=24),
+        id="rolling-deep", max_instances=1, coalesce=True,
     )
     scheduler.add_job(
         request_template_update,
@@ -167,8 +190,10 @@ def main() -> None:
         id="template-sync", max_instances=1, coalesce=True,
     )
     scheduler.start()
-    logger.info("worker started; full scan cron=%r, template sync every %sh",
-                settings.full_scan_cron, settings.template_update_hours)
+    logger.info("worker started; rolling quick (%s, %sd cycle) and deep (%s, %sd cycle) every 24h, "
+                "template sync every %sh",
+                settings.rolling_preset, settings.rolling_cycle_days,
+                settings.deep_preset, settings.deep_cycle_days, settings.template_update_hours)
 
     last_purge = 0.0
     pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_runs, thread_name_prefix="scan")

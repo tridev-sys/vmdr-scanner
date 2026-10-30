@@ -17,6 +17,7 @@ ADDITIVE_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("last_probe_error", "VARCHAR(255)"),
         ("last_result", "VARCHAR(16)"),
         ("last_open_findings", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_deep_scanned_at", "DATETIME"),
     ],
     "scan_runs": [
         ("attempts", "INTEGER NOT NULL DEFAULT 0"),

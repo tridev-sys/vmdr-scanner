@@ -64,6 +64,8 @@ class Target(SQLModel, table=True):
     # Result of the last completed scan: CLEAN (no open findings) or VULNERABLE. None if never scanned.
     last_result: str | None = Field(default=None, max_length=16)
     last_open_findings: int = 0
+    # Set only by completed deep runs, so the monthly deep cycle is independent of quick scans.
+    last_deep_scanned_at: datetime | None = None
 
 
 class Vulnerability(SQLModel, table=True):

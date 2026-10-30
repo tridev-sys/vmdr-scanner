@@ -20,12 +20,18 @@ class Settings(BaseSettings):
     # Hosts Nuclei works on in parallel per template (Nuclei's own default is 25).
     nuclei_bulk_size: int = 50
     # Targets per Nuclei process, and how many processes run at once within one scan run.
-    scan_chunk_size: int = 10
+    # Hosts per Nuclei process. Larger chunks load templates once for more hosts (Phase 1 batching).
+    scan_chunk_size: int = 200
     scan_parallel_chunks: int = 3
     # Newest CVE years are scanned first (0 disables). Templates live under <dir>/**/cves/<year>.
     recent_cve_years: int = 2
     # Scans that may run at the same time. Runs with overlapping targets never run together.
     max_concurrent_runs: int = 5
+    # Rolling schedule (Phase 1): each active target is scanned once per cycle, in daily batches.
+    rolling_cycle_days: int = 7
+    rolling_preset: str = "quick"
+    deep_cycle_days: int = 30
+    deep_preset: str = "deep"
     # Scan reports older than this are deleted by the worker.
     report_retention_days: int = 5
     nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"

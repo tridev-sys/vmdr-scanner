@@ -25,7 +25,7 @@ def _setup(pipeline, monkeypatch):
     rec.chmod(0o755)
     templates = tmp / "templates"
     year = __import__("datetime").datetime.now().year
-    for path in [f"http/cves/{year}", f"http/cves/{year - 15}", "http/misc"]:
+    for path in [f"http/cves/{year}", f"http/cves/{year - 15}", "http/misc", "http/vulnerabilities/generic"]:
         (templates / path).mkdir(parents=True)
     monkeypatch.setenv("VMDR_NUCLEI_BIN", str(rec))
     monkeypatch.setenv("VMDR_NUCLEI_TEMPLATES_DIR", str(templates))
@@ -63,14 +63,17 @@ def test_quick_preset_reaches_scanner_with_window_and_rate(pipeline, monkeypatch
     pipeline["scanner"].execute_run(body["id"])
 
     calls = _calls(pipeline["tmp"])
-    assert len(calls) == 1, calls  # CVE-only: the window pass, no non-CVE pass
-    window = calls[0]
+    assert len(calls) == 2, calls  # window pass (CVE), then generic web checks only
+    window, generic = calls
     # Window pass: only the current-year CVE folder, at the preset rate.
     assert window[window.index("-t") + 1].endswith(f"http/cves/{year}")
     assert window.count("-t") == 1 and "-et" not in window
     assert window[window.index("-rate-limit") + 1] == "150"
     assert window[window.index("-severity") + 1] == "critical,high"
     assert "-stats" in window
+    # Generic pass: only the generic web vulnerability folder, no CVE folders.
+    assert generic[generic.index("-t") + 1].endswith("http/vulnerabilities")
+    assert "-et" not in generic and generic.count("-t") == 1
 
     with Session(pipeline["db"].engine) as s:
         assert s.get(ScanRun, body["id"]).status == "COMPLETED"

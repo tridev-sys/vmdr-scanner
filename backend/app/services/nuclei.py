@@ -42,6 +42,11 @@ def recent_cve_dirs(root: Path, years: list[int]) -> list[str]:
     return sorted(dirs)
 
 
+def generic_template_dirs(root: Path) -> list[str]:
+    """Generic web vulnerability and exposure checks (not CVE-numbered), e.g. the .env and SQLi checks."""
+    return [str(root / d) for d in ("http/vulnerabilities", "http/exposures") if (root / d).is_dir()]
+
+
 def all_cve_dirs(root: Path) -> list[str]:
     """Every year-named CVE template directory, for excluding CVE templates from a pass."""
     if not root.is_dir():
