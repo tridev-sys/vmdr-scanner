@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Targets per Nuclei process, and how many processes run at once within one scan run.
     scan_chunk_size: int = 10
     scan_parallel_chunks: int = 3
+    # Newest CVE years are scanned first (0 disables). Templates live under <dir>/**/cves/<year>.
+    recent_cve_years: int = 2
+    nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
     nuclei_severities: str = "critical,high,medium"

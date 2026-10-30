@@ -34,9 +34,23 @@ class Finding:
     timestamp: str | None = None
 
 
-def build_command(targets_file: Path, output_file: Path, severities: list[str]) -> list[str]:
+def recent_cve_dirs(root: Path, years: list[int]) -> list[str]:
+    """Template directories holding CVEs from the given years, e.g. <root>/http/cves/2026."""
+    if not years or not root.is_dir():
+        return []
+    dirs = {str(p) for year in years for p in root.glob(f"**/cves/{year}") if p.is_dir()}
+    return sorted(dirs)
+
+
+def build_command(
+    targets_file: Path,
+    output_file: Path,
+    severities: list[str],
+    templates: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[str]:
     s = get_settings()
-    return [
+    cmd = [
         s.nuclei_bin,
         "-list", str(targets_file),
         "-severity", ",".join(severities),
@@ -50,6 +64,11 @@ def build_command(targets_file: Path, output_file: Path, severities: list[str]) 
         "-silent",
         "-no-color",
     ]
+    for path in templates or []:
+        cmd += ["-t", path]
+    for path in exclude or []:
+        cmd += ["-et", path]
+    return cmd
 
 
 def update_templates(stop_event: threading.Event | None = None, log_path: Path | None = None) -> tuple[bool, str]:

@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.db import engine
 from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStatus, WorkerState, WorkerStatus, utcnow
 from app.services.ingest import ingest
-from app.services.nuclei import build_command, parse_jsonl
+from app.services.nuclei import build_command, parse_jsonl, recent_cve_dirs
 from app.services.probe import probe_urls
 from app.services.process import ProcessOutcome, run_process
 from app.services.webhooks import dispatch_alerts
@@ -148,6 +148,17 @@ def execute_run(run_id: int) -> None:
             set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)
 
 
+def _run_passes(passes, timeout_s: int, should_stop) -> ProcessOutcome:
+    """Run one chunk's passes in order (recent CVE templates first). Stops at the first bad pass."""
+    last = ProcessOutcome(0)
+    for cmd, _output, log_path, pid_path in passes:
+        outcome = run_process(cmd, log_path, timeout_s, shutdown_event, None, pid_path, should_stop)
+        if outcome.interrupted or outcome.timed_out or outcome.returncode != 0:
+            return outcome
+        last = outcome
+    return last
+
+
 def _execute_started(session: Session, run_id: int, target_ids: list[int], settings) -> None:
     run = session.get(ScanRun, run_id)
     if not target_ids:
@@ -195,15 +206,31 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         f"{min(settings.scan_parallel_chunks, len(chunks))} at a time, severities={run.severities}",
     )
 
+    # Newest CVEs first: pass 1 runs only the newest CVE template years, pass 2 runs the rest
+    # with those excluded, so every template still runs exactly once.
+    recent_years = [utcnow().year - i for i in range(settings.recent_cve_years)]
+    recent_dirs = recent_cve_dirs(Path(settings.nuclei_templates_dir), recent_years)
+    if recent_dirs:
+        log_line(session, run_id, f"Recent-first: {len(recent_dirs)} template dir(s) for {recent_years} run before the rest")
+    severities = run.severities.split(",")
+    labels = (["recent"] if recent_dirs else []) + ["rest"]
+
     jobs = []
     for index, chunk in enumerate(chunks):
         targets_file = workdir / f"targets_{index:03d}.txt"
         targets_file.write_text("\n".join(t.url for t in chunk) + "\n", encoding="utf-8")
-        chunk_output = workdir / f"output_{index:03d}.jsonl"
-        chunk_output.unlink(missing_ok=True)
-        cmd = build_command(targets_file, chunk_output, run.severities.split(","))
-        jobs.append((index, len(chunk), cmd, chunk_output, workdir / f"nuclei_{index:03d}.log",
-                     workdir / f"nuclei_{index:03d}.pid"))
+        passes = []
+        for label in labels:
+            output = workdir / f"output_{index:03d}_{label}.jsonl"
+            output.unlink(missing_ok=True)
+            cmd = build_command(
+                targets_file, output, severities,
+                templates=recent_dirs if label == "recent" else None,
+                exclude=None if label == "recent" else recent_dirs,
+            )
+            passes.append((cmd, output, workdir / f"nuclei_{index:03d}_{label}.log",
+                           workdir / f"nuclei_{index:03d}_{label}.pid"))
+        jobs.append((index, len(chunk), passes))
 
     outcomes: list[ProcessOutcome] = []
     failed_to_start: str | None = None
@@ -211,10 +238,9 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
     pool = ThreadPoolExecutor(max_workers=parallel)
     pending = {}
     try:
-        for index, count, cmd, chunk_output, log_path, pid_path in jobs:
+        for index, count, passes in jobs:
             pending[pool.submit(
-                run_process, cmd, log_path, settings.nuclei_run_timeout_s, shutdown_event,
-                None, pid_path, lambda: _cancel_requested(run_id),
+                _run_passes, passes, settings.nuclei_run_timeout_s, lambda: _cancel_requested(run_id),
             )] = (index, count)
         while pending:
             # Wait in short slices so the heartbeat stays fresh during long chunks.
@@ -268,15 +294,13 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     # Merge chunk outputs into the run's single results file.
     with output_file.open("w", encoding="utf-8") as merged:
-        for index in range(len(jobs)):
-            chunk_output = workdir / f"output_{index:03d}.jsonl"
-            if chunk_output.exists():
-                merged.write(chunk_output.read_text(encoding="utf-8", errors="replace"))
+        for part in sorted(workdir.glob("output_*.jsonl")):
+            merged.write(part.read_text(encoding="utf-8", errors="replace"))
 
-    for index in range(len(jobs)):
-        tail = (workdir / f"nuclei_{index:03d}.log").read_text(encoding="utf-8", errors="replace").strip().splitlines()[-5:]
+    for log_file in sorted(workdir.glob("nuclei_*.log")):
+        tail = log_file.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-5:]
         for line in tail:
-            log_line(session, run_id, f"nuclei[{index:03d}]: {line}", "DEBUG")
+            log_line(session, run_id, f"nuclei[{log_file.stem}]: {line}", "DEBUG")
 
     findings, bad = parse_jsonl(output_file)
     stats = ingest(session, run_id, targets, findings, bad, resolve=ok)

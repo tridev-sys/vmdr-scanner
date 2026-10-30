@@ -66,3 +66,21 @@ def test_command_sets_bulk_size(tmp_path, monkeypatch):
     cmd = build_command(tmp_path / "t.txt", tmp_path / "o.jsonl", ["high"])
     assert cmd[cmd.index("-bulk-size") + 1] == "50"
     config.get_settings.cache_clear()
+
+
+def test_recent_cve_dirs_picks_only_requested_years(tmp_path):
+    from app.services.nuclei import recent_cve_dirs
+    for path in ["http/cves/2026", "http/cves/2025", "http/cves/2014", "code/cves/2026", "http/misc"]:
+        (tmp_path / path).mkdir(parents=True)
+    dirs = recent_cve_dirs(tmp_path, [2026, 2025])
+    assert len(dirs) == 3
+    assert all(d.endswith(("2026", "2025")) for d in dirs)
+    assert recent_cve_dirs(tmp_path, []) == []
+    assert recent_cve_dirs(tmp_path / "missing", [2026]) == []
+
+
+def test_build_command_templates_and_exclusions(tmp_path):
+    from app.services.nuclei import build_command
+    cmd = build_command(tmp_path / "t", tmp_path / "o", ["high"], templates=["/x/2026"], exclude=["/x/2026", "/x/2025"])
+    assert cmd.count("-t") == 1 and cmd[cmd.index("-t") + 1] == "/x/2026"
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-et"] == ["/x/2026", "/x/2025"]
