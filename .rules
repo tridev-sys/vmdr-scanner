@@ -1,0 +1,15 @@
+# VMDR project rules
+
+## Docker: never prune (strict)
+
+Never run any `docker prune` command, on any host this project touches (the laptop, or EC2 at 43.204.217.241). This includes:
+
+- `docker system prune` (with or without `-a` or `--volumes`)
+- `docker image prune`, `docker container prune`, `docker volume prune`, `docker network prune`, `docker builder prune`
+- any equivalent that deletes unused images, containers, volumes, networks, or build cache
+
+Why: the `vmdr-data`, `vmdr-nuclei-templates`, and `vmdr-pgdata` volumes hold the scan history, reports, and the PostgreSQL database. Prune can remove volumes and cached layers that are needed to rebuild the stack or restore data. Removing them loses data that cannot be recovered without a backup.
+
+If disk space is a problem, report it to the user and list the candidates (for example, a specific image tag or a dangling layer) with sizes. Do not delete anything. Remove a single named item only when the user asks for that item by name, and only after confirming it is not a VMDR volume.
+
+Also never run `docker compose down -v` or `docker volume rm` on the `vmdr-*` volumes without the user's explicit approval for that exact command.
