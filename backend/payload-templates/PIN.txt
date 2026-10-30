@@ -1,0 +1,3 @@
+source: https://github.com/projectdiscovery/fuzzing-templates
+commit: 5585787b43e6f7242fcbb706688f9528be63e29f
+archived: true (upstream last pushed 2024-05-02); payloads are maintained here

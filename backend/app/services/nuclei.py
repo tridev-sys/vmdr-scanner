@@ -47,6 +47,11 @@ def generic_template_dirs(root: Path) -> list[str]:
     return [str(root / d) for d in ("http/vulnerabilities", "http/exposures") if (root / d).is_dir()]
 
 
+def payload_template_dirs(root: Path) -> list[str]:
+    """Payload-injecting DAST templates (vendored under backend/payload-templates). Run with -dast."""
+    return [str(root)] if root.is_dir() and any(root.rglob("*.yaml")) else []
+
+
 def all_cve_dirs(root: Path) -> list[str]:
     """Every year-named CVE template directory, for excluding CVE templates from a pass."""
     if not root.is_dir():
@@ -61,6 +66,7 @@ def build_command(
     templates: list[str] | None = None,
     exclude: list[str] | None = None,
     rate_limit: int | None = None,
+    dast: bool = False,
 ) -> list[str]:
     s = get_settings()
     cmd = [
@@ -79,6 +85,9 @@ def build_command(
         # Progress lines go to the run log so a long scan shows what it is doing.
         "-stats", "-stats-interval", "15",
     ]
+    if dast:
+        # Payload templates only load in DAST mode; it fuzzes query parameters of each target URL.
+        cmd.append("-dast")
     for path in templates or []:
         cmd += ["-t", path]
     for path in exclude or []:

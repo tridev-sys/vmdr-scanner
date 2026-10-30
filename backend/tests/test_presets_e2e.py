@@ -29,6 +29,10 @@ def _setup(pipeline, monkeypatch):
         (templates / path).mkdir(parents=True)
     monkeypatch.setenv("VMDR_NUCLEI_BIN", str(rec))
     monkeypatch.setenv("VMDR_NUCLEI_TEMPLATES_DIR", str(templates))
+    payloads = tmp / "payload-templates" / "xss"
+    payloads.mkdir(parents=True)
+    (payloads / "reflected.yaml").write_text("id: reflected\n")
+    monkeypatch.setenv("VMDR_PAYLOAD_TEMPLATES_DIR", str(tmp / "payload-templates"))
     monkeypatch.setenv("REC_LOG", str(tmp / "rec.log"))
     config.get_settings.cache_clear()
     with Session(pipeline["db"].engine) as s:
@@ -63,8 +67,8 @@ def test_quick_preset_reaches_scanner_with_window_and_rate(pipeline, monkeypatch
     pipeline["scanner"].execute_run(body["id"])
 
     calls = _calls(pipeline["tmp"])
-    assert len(calls) == 2, calls  # window pass (CVE), then generic web checks only
-    window, generic = calls
+    assert len(calls) == 3, calls  # window pass (CVE), generic web checks, then payload DAST
+    window, generic, payload = calls
     # Window pass: only the current-year CVE folder, at the preset rate.
     assert window[window.index("-t") + 1].endswith(f"http/cves/{year}")
     assert window.count("-t") == 1 and "-et" not in window
@@ -74,6 +78,11 @@ def test_quick_preset_reaches_scanner_with_window_and_rate(pipeline, monkeypatch
     # Generic pass: only the generic web vulnerability folder, no CVE folders.
     assert generic[generic.index("-t") + 1].endswith("http/vulnerabilities")
     assert "-et" not in generic and generic.count("-t") == 1
+    assert "-dast" not in window and "-dast" not in generic
+    # Payload pass: DAST mode, only the vendored payload directory.
+    assert "-dast" in payload
+    assert payload[payload.index("-t") + 1].endswith("payload-templates")
+    assert payload.count("-t") == 1
 
     with Session(pipeline["db"].engine) as s:
         assert s.get(ScanRun, body["id"]).status == "COMPLETED"

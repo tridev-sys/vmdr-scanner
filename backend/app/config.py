@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Scan reports older than this are deleted by the worker.
     report_retention_days: int = 5
     nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"
+    # Vendored payload-injecting DAST templates (see backend/payload-templates/PIN.txt).
+    payload_templates_dir: str = "/opt/vmdr/payload-templates"
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
     nuclei_severities: str = "critical,high,medium"

@@ -18,7 +18,9 @@ from app.config import get_settings
 from app.db import engine
 from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStatus, WorkerState, WorkerStatus, utcnow
 from app.services.ingest import ingest
-from app.services.nuclei import all_cve_dirs, build_command, generic_template_dirs, parse_jsonl, recent_cve_dirs
+from app.services.nuclei import (
+    all_cve_dirs, build_command, generic_template_dirs, parse_jsonl, payload_template_dirs, recent_cve_dirs,
+)
 from app.services.probe import probe_urls
 from app.services.process import ProcessOutcome, run_process
 from app.services.webhooks import dispatch_alerts
@@ -244,6 +246,11 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         if recent_dirs:
             log_line(session, run_id, f"Recent-first: {len(recent_dirs)} template dir(s) run before the rest")
         spec = ([("recent", recent_dirs, None)] if recent_dirs else []) + [("rest", None, recent_dirs)]
+    # Payload DAST pass (last): fuzzes query parameters with attack payloads. Runs in every preset.
+    payload_dirs = payload_template_dirs(Path(settings.payload_templates_dir))
+    if payload_dirs:
+        spec.append(("payload", payload_dirs, None, True))
+    spec = [(*entry, False) if len(entry) == 3 else entry for entry in spec]
     severities = run.severities.split(",")
 
     jobs = []
@@ -251,11 +258,11 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         targets_file = workdir / f"targets_{index:03d}.txt"
         targets_file.write_text("\n".join(t.url for t in chunk) + "\n", encoding="utf-8")
         passes = []
-        for label, templates, exclude in spec:
+        for label, templates, exclude, dast in spec:
             output = workdir / f"output_{index:03d}_{label}.jsonl"
             output.unlink(missing_ok=True)
             cmd = build_command(targets_file, output, severities, templates=templates, exclude=exclude,
-                                rate_limit=run.rate_limit)
+                                rate_limit=run.rate_limit, dast=dast)
             passes.append((cmd, output, workdir / f"nuclei_{index:03d}_{label}.log",
                            workdir / f"nuclei_{index:03d}_{label}.pid"))
         jobs.append((index, len(chunk), passes))
