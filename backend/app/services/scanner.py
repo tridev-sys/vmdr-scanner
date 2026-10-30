@@ -9,6 +9,7 @@ Guarantees:
 
 import logging
 import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -19,7 +20,7 @@ from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStat
 from app.services.ingest import ingest
 from app.services.nuclei import build_command, parse_jsonl
 from app.services.probe import probe_urls
-from app.services.process import run_process
+from app.services.process import ProcessOutcome, run_process
 from app.services.webhooks import dispatch_alerts
 
 logger = logging.getLogger(__name__)
@@ -156,10 +157,6 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     log_line(session, run_id, f"Probing {len(target_ids)} ACTIVE target(s)")
     reachable_ids, unreachable = _probe_and_split(session, target_ids)
-    if _cancel_requested(run_id):
-        _finish(session, run_id, RunStatus.CANCELLED, "cancelled by user")
-        log_line(session, run_id, "Cancelled by user before Nuclei started", "WARN")
-        return
     run = session.get(ScanRun, run_id)
     run.unreachable_count = len(unreachable)
     session.add(run)
@@ -167,6 +164,10 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
     if unreachable:
         sample = ", ".join(unreachable[:10]) + (" ..." if len(unreachable) > 10 else "")
         log_line(session, run_id, f"Skipping {len(unreachable)} unreachable target(s): {sample}", "WARN")
+    if _cancel_requested(run_id):
+        _finish(session, run_id, RunStatus.CANCELLED, "cancelled by user")
+        log_line(session, run_id, "Cancelled by user before Nuclei started", "WARN")
+        return
 
     if not reachable_ids:
         _finish(session, run_id, RunStatus.COMPLETED, None)
@@ -176,32 +177,77 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
     targets = [session.get(Target, tid) for tid in reachable_ids]
     workdir: Path = settings.scan_workdir / f"run-{run.id}"
     workdir.mkdir(parents=True, exist_ok=True)
-    targets_file = workdir / "targets_active.txt"
     output_file = workdir / "scan_output.jsonl"
-    targets_file.write_text("\n".join(t.url for t in targets) + "\n", encoding="utf-8")
     output_file.unlink(missing_ok=True)
+
+    # Chunks: each chunk is one Nuclei process over a slice of the targets. Several run at once.
+    size = max(1, settings.scan_chunk_size)
+    chunks = [targets[i:i + size] for i in range(0, len(targets), size)]
     run.output_path = str(output_file)
+    run.chunks_total = len(chunks)
+    run.chunks_done = 0
+    run.targets_scanned = 0
     session.add(run)
     session.commit()
+    log_line(
+        session, run_id,
+        f"Scanning {len(targets)} reachable target(s) in {len(chunks)} chunk(s) of up to {size}, "
+        f"{min(settings.scan_parallel_chunks, len(chunks))} at a time, severities={run.severities}",
+    )
 
-    cmd = build_command(targets_file, output_file, run.severities.split(","))
-    log_line(session, run_id, f"Scanning {len(targets)} reachable target(s) at severities={run.severities}")
+    jobs = []
+    for index, chunk in enumerate(chunks):
+        targets_file = workdir / f"targets_{index:03d}.txt"
+        targets_file.write_text("\n".join(t.url for t in chunk) + "\n", encoding="utf-8")
+        chunk_output = workdir / f"output_{index:03d}.jsonl"
+        chunk_output.unlink(missing_ok=True)
+        cmd = build_command(targets_file, chunk_output, run.severities.split(","))
+        jobs.append((index, len(chunk), cmd, chunk_output, workdir / f"nuclei_{index:03d}.log",
+                     workdir / f"nuclei_{index:03d}.pid"))
 
-    def heartbeat() -> None:
-        set_worker_state(session, status=WorkerStatus.SCANNING, current_run_id=run_id)
-
+    outcomes: list[ProcessOutcome] = []
+    failed_to_start: str | None = None
+    parallel = max(1, min(settings.scan_parallel_chunks, len(jobs)))
+    pool = ThreadPoolExecutor(max_workers=parallel)
+    pending = {}
     try:
-        outcome = run_process(
-            cmd, workdir / "nuclei.log", settings.nuclei_run_timeout_s, shutdown_event,
-            on_heartbeat=heartbeat, pid_path=workdir / "nuclei.pid",
-            should_stop=lambda: _cancel_requested(run_id),
-        )
-    except FileNotFoundError:
-        _finish(session, run_id, RunStatus.FAILED, f"nuclei binary not found at {settings.nuclei_bin}")
-        log_line(session, run_id, f"nuclei binary not found at {settings.nuclei_bin}", "ERROR")
+        for index, count, cmd, chunk_output, log_path, pid_path in jobs:
+            pending[pool.submit(
+                run_process, cmd, log_path, settings.nuclei_run_timeout_s, shutdown_event,
+                None, pid_path, lambda: _cancel_requested(run_id),
+            )] = (index, count)
+        while pending:
+            # Wait in short slices so the heartbeat stays fresh during long chunks.
+            done, _ = wait(list(pending), timeout=HEARTBEAT_INTERVAL_S, return_when=FIRST_COMPLETED)
+            for future in done:
+                index, count = pending.pop(future)
+                try:
+                    outcome = future.result()
+                except FileNotFoundError:
+                    failed_to_start = f"nuclei binary not found at {settings.nuclei_bin}"
+                    outcome = ProcessOutcome(None, interrupted=True)
+                outcomes.append(outcome)
+                run = session.get(ScanRun, run_id)
+                run.chunks_done += 1
+                if outcome.returncode == 0 and not outcome.timed_out and not outcome.interrupted:
+                    run.targets_scanned += count
+                session.add(run)
+                session.commit()
+                log_line(session, run_id,
+                         f"chunk {index + 1}/{len(jobs)} finished (exit {outcome.returncode}"
+                         + (", timed out" if outcome.timed_out else "")
+                         + (", interrupted" if outcome.interrupted else "") + ")",
+                         "INFO" if outcome.returncode == 0 and not outcome.timed_out else "WARN")
+            set_worker_state(session, status=WorkerStatus.SCANNING, current_run_id=run_id)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    if failed_to_start:
+        _finish(session, run_id, RunStatus.FAILED, failed_to_start)
+        log_line(session, run_id, failed_to_start, "ERROR")
         return
 
-    if outcome.interrupted:
+    if any(o.interrupted for o in outcomes):
         # Partial output is never ingested: a half-finished scan must not resolve anything.
         if _cancel_requested(run_id):
             _finish(session, run_id, RunStatus.CANCELLED, "cancelled by user")
@@ -210,18 +256,27 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
             _requeue_or_fail(session, run_id, "interrupted by worker shutdown")
         return
 
-    nuclei_log = workdir / "nuclei.log"
-    tail = nuclei_log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-15:]
-    for line in tail:
-        log_line(session, run_id, f"nuclei: {line}", "DEBUG")
-
-    ok = outcome.returncode == 0 and not outcome.timed_out
-    if outcome.timed_out:
+    timed_out = any(o.timed_out for o in outcomes)
+    bad_exit = next((o.returncode for o in outcomes if o.returncode != 0), None)
+    ok = not timed_out and bad_exit is None
+    if timed_out:
         error = f"nuclei exceeded run timeout ({settings.nuclei_run_timeout_s}s)"
-    elif outcome.returncode != 0:
-        error = f"nuclei exited with code {outcome.returncode}"
+    elif bad_exit is not None:
+        error = f"nuclei exited with code {bad_exit}"
     else:
         error = None
+
+    # Merge chunk outputs into the run's single results file.
+    with output_file.open("w", encoding="utf-8") as merged:
+        for index in range(len(jobs)):
+            chunk_output = workdir / f"output_{index:03d}.jsonl"
+            if chunk_output.exists():
+                merged.write(chunk_output.read_text(encoding="utf-8", errors="replace"))
+
+    for index in range(len(jobs)):
+        tail = (workdir / f"nuclei_{index:03d}.log").read_text(encoding="utf-8", errors="replace").strip().splitlines()[-5:]
+        for line in tail:
+            log_line(session, run_id, f"nuclei[{index:03d}]: {line}", "DEBUG")
 
     findings, bad = parse_jsonl(output_file)
     stats = ingest(session, run_id, targets, findings, bad, resolve=ok)

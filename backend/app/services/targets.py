@@ -49,6 +49,11 @@ def to_target_out(target: Target, counts: VulnCounts) -> TargetOut:
         last_scan_status=target.last_scan_status,
         risk=_risk(counts),
         vuln_counts=counts,
+        reachability=target.reachability,
+        last_probe_error=target.last_probe_error,
+        consecutive_probe_failures=target.consecutive_probe_failures,
+        last_result=target.last_result,
+        last_open_findings=target.last_open_findings,
     )
 
 

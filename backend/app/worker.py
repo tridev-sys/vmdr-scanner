@@ -109,7 +109,9 @@ def recover_orphaned_runs() -> int:
     recovered = 0
     with Session(engine) as session:
         for run in session.exec(select(ScanRun).where(ScanRun.status == RunStatus.RUNNING)).all():
-            if kill_stale_group(settings.scan_workdir / f"run-{run.id}" / "nuclei.pid"):
+            workdir = settings.scan_workdir / f"run-{run.id}"
+            killed = [kill_stale_group(pid_file) for pid_file in sorted(workdir.glob("nuclei*.pid"))]
+            if any(killed):
                 log_line(session, run.id, "killed Nuclei left running by the previous worker", "WARN")
             reason = "interrupted: worker restarted before the run finished"
             if run.attempts < MAX_RUN_ATTEMPTS:

@@ -13,7 +13,10 @@ HEARTBEAT_STALE_AFTER = timedelta(minutes=2)
 
 
 def run_out(run: ScanRun) -> ScanRunOut:
-    return ScanRunOut.model_validate(run, from_attributes=True)
+    out = ScanRunOut.model_validate(run, from_attributes=True)
+    if run.started_at and run.finished_at:
+        out.duration_seconds = round((run.finished_at - run.started_at).total_seconds(), 1)
+    return out
 
 
 def _count_lines(path: str | None) -> int | None:

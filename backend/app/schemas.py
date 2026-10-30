@@ -48,6 +48,12 @@ class TargetOut(BaseModel):
     last_scan_status: str | None
     risk: Literal["critical", "high", "medium", "low", "none"]
     vuln_counts: VulnCounts
+    # Reachability from the pre-scan probe, and the result of the last completed scan.
+    reachability: str = "UNKNOWN"
+    last_probe_error: str | None = None
+    consecutive_probe_failures: int = 0
+    last_result: str | None = None  # CLEAN | VULNERABLE | None (never scanned)
+    last_open_findings: int = 0
 
 
 class TargetPage(BaseModel):
@@ -88,6 +94,10 @@ class ScanRunOut(BaseModel):
     scope: str
     target_id: int | None
     severities: str
+    targets_scanned: int = 0
+    chunks_total: int = 0
+    chunks_done: int = 0
+    duration_seconds: float | None = None
     status: str
     requested_by: str
     targets_count: int

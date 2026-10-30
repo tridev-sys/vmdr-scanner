@@ -128,6 +128,14 @@ def ingest(
             target.last_scanned_at = now
             target.last_scan_status = "COMPLETED"
             session.add(target)
+        session.flush()
+        for target in targets:
+            open_count = len(session.exec(select(Vulnerability).where(
+                Vulnerability.target_id == target.id, Vulnerability.status == VulnStatus.OPEN,
+            )).all())
+            target.last_open_findings = open_count
+            target.last_result = "CLEAN" if open_count == 0 else "VULNERABLE"
+            session.add(target)
 
     session.commit()
     return stats

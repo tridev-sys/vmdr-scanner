@@ -28,6 +28,16 @@ def _sleeping_nuclei(tmp_path, monkeypatch):
     return fake
 
 
+def _wait_for_pid(workdir):
+    """Wait until a chunk's Nuclei process has written its pid file, then return the pid."""
+    for _ in range(200):
+        files = sorted(workdir.glob("nuclei*.pid"))
+        if files:
+            return int(files[0].read_text())
+        time.sleep(0.05)
+    raise AssertionError("nuclei never started")
+
+
 def _process_alive(pid: int) -> bool:
     import os
     try:
@@ -52,13 +62,7 @@ def test_shutdown_interrupts_scan_and_requeues_run(pipeline, monkeypatch):
     started = time.monotonic()
     worker_thread.start()
 
-    pid_file = pipeline["tmp"] / "scans" / f"run-{run_id}" / "nuclei.pid"
-    for _ in range(100):  # wait until Nuclei is actually running
-        if pid_file.exists():
-            break
-        time.sleep(0.05)
-    assert pid_file.exists(), "nuclei never started"
-    nuclei_pid = int(pid_file.read_text())
+    nuclei_pid = _wait_for_pid(pipeline["tmp"] / "scans" / f"run-{run_id}")
 
     scanner.shutdown_event.set()  # what the SIGTERM handler does
     worker_thread.join(timeout=30)
@@ -199,12 +203,7 @@ def test_cancel_running_scan_kills_nuclei_and_marks_cancelled(pipeline, monkeypa
     run_id = _queue_run(db)
     thread = threading.Thread(target=scanner.execute_run, args=(run_id,))
     thread.start()
-    pid_file = pipeline["tmp"] / "scans" / f"run-{run_id}" / "nuclei.pid"
-    for _ in range(100):
-        if pid_file.exists():
-            break
-        time.sleep(0.05)
-    nuclei_pid = int(pid_file.read_text())
+    nuclei_pid = _wait_for_pid(pipeline["tmp"] / "scans" / f"run-{run_id}")
 
     with Session(db.engine) as s:  # what POST /api/scans/{id}/cancel does for a RUNNING run
         run = s.get(ScanRun, run_id)

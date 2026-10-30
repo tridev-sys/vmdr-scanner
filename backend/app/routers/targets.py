@@ -29,12 +29,22 @@ def list_targets(
     status_filter: str | None = Query(None, alias="status", pattern="^(ACTIVE|PAUSED|ARCHIVED)$"),
     domain: str | None = Query(None, description="Domain root, e.g. koala.cx"),
     tag: str | None = None,
+    result: str | None = Query(None, pattern="^(CLEAN|VULNERABLE|UNREACHABLE|UNSCANNED)$",
+                              description="Last scan outcome"),
 ) -> TargetPage:
     stmt = select(Target)
     if status_filter:
         stmt = stmt.where(Target.status == status_filter)
     else:
         stmt = stmt.where(Target.status != TargetStatus.ARCHIVED)
+    if result == "CLEAN":
+        stmt = stmt.where(Target.last_result == "CLEAN")
+    elif result == "VULNERABLE":
+        stmt = stmt.where(Target.last_result == "VULNERABLE")
+    elif result == "UNREACHABLE":
+        stmt = stmt.where(Target.reachability == "UNREACHABLE")
+    elif result == "UNSCANNED":
+        stmt = stmt.where(Target.last_result.is_(None))
     if domain:
         stmt = stmt.where(Target.domain_root == domain.lower())
     if tag:

@@ -4,6 +4,10 @@ export type Severity = "critical" | "high" | "medium" | "low" | "info" | "unknow
 export type TargetStatus = "ACTIVE" | "PAUSED" | "ARCHIVED";
 export type VulnStatus = "OPEN" | "FALSE_POSITIVE" | "ACCEPTED_RISK" | "RESOLVED";
 export type RiskLevel = "critical" | "high" | "medium" | "low" | "none";
+export type Reachability = "UNKNOWN" | "REACHABLE" | "UNREACHABLE";
+export type LastResult = "CLEAN" | "VULNERABLE";
+/** Filter values accepted by GET /api/targets?result= */
+export type ResultFilter = "CLEAN" | "VULNERABLE" | "UNREACHABLE" | "UNSCANNED";
 
 export interface VulnCounts {
   open: number;
@@ -27,6 +31,11 @@ export interface Target {
   last_scan_status: string | null;
   risk: RiskLevel;
   vuln_counts: VulnCounts;
+  reachability: Reachability;
+  last_probe_error: string | null;
+  consecutive_probe_failures: number;
+  last_result: LastResult | null;
+  last_open_findings: number;
 }
 
 export interface TargetPage {
@@ -64,10 +73,14 @@ export interface ScanRun {
   finished_at: string | null;
   unreachable_count?: number;
   cancel_requested?: boolean;
+  targets_scanned?: number;
+  chunks_total?: number;
+  chunks_done?: number;
+  /** Set once the run has finished. */
+  duration_seconds?: number | null;
 }
 
 export type RunStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
-export type Reachability = "UNKNOWN" | "REACHABLE" | "UNREACHABLE";
 
 export interface ActiveTarget {
   id: number;

@@ -1,9 +1,68 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Archive, Pause, Play, Plus, Radar, Search, Upload } from "lucide-react";
 import { Button, Card, EmptyState, ErrorText, Input, Modal, RiskBadge, TargetStatusBadge } from "../components/ui";
-import { api, timeAgo, type BulkImportResult, type DomainGroup, type Target, type TargetPage } from "../lib/api";
+import {
+  api,
+  timeAgo,
+  type BulkImportResult,
+  type DomainGroup,
+  type ResultFilter,
+  type Target,
+  type TargetPage,
+} from "../lib/api";
 
 const PAGE_SIZE = 25;
+
+const RESULT_OPTIONS: { value: "" | ResultFilter; label: string }[] = [
+  { value: "", label: "All results" },
+  { value: "CLEAN", label: "Clean" },
+  { value: "VULNERABLE", label: "Vulnerable" },
+  { value: "UNREACHABLE", label: "Unreachable" },
+  { value: "UNSCANNED", label: "Not scanned" },
+];
+
+type ScanResultState = "CLEAN" | "VULNERABLE" | "UNREACHABLE" | "UNSCANNED";
+
+/**
+ * Derives the scan-result state shown on a row. A target that was skipped because it was
+ * unreachable is shown as "Unreachable", which is a probe outcome, not a scan failure.
+ */
+function scanResultState(t: Target): ScanResultState {
+  if (t.last_result === "CLEAN") return "CLEAN";
+  if (t.last_result === "VULNERABLE") return "VULNERABLE";
+  if (t.reachability === "UNREACHABLE" || t.last_scan_status === "SKIPPED_UNREACHABLE") return "UNREACHABLE";
+  return "UNSCANNED";
+}
+
+const RESULT_BADGE_STYLE: Record<ScanResultState, string> = {
+  CLEAN: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  VULNERABLE: "bg-red-50 text-red-700 ring-red-200",
+  UNREACHABLE: "bg-amber-50 text-amber-700 ring-amber-200",
+  UNSCANNED: "bg-slate-100 text-slate-600 ring-slate-200",
+};
+
+function ScanResultCell({ target }: { target: Target }) {
+  const state = scanResultState(target);
+  const label =
+    state === "CLEAN" ? "Clean"
+    : state === "VULNERABLE" ? `Vulnerable · ${target.last_open_findings}`
+    : state === "UNREACHABLE" ? "Unreachable"
+    : "Not scanned";
+  const error = state === "UNREACHABLE" ? target.last_probe_error : null;
+  return (
+    <div className="min-w-0 max-w-[14rem]">
+      <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${RESULT_BADGE_STYLE[state]}`}>
+        {label}
+      </span>
+      {error && (
+        <div className="mt-1 truncate text-xs text-slate-400" title={error}>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AddTargetModal({ onClose, onDone }: { onClose: () => void; onDone: (r: BulkImportResult) => void }) {
   const [url, setUrl] = useState("");
@@ -115,7 +174,12 @@ export default function TargetsPage() {
   const [data, setData] = useState<TargetPage | null>(null);
   const [domains, setDomains] = useState<DomainGroup[]>([]);
   const [q, setQ] = useState("");
+  const [searchParams] = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [resultFilter, setResultFilter] = useState<"" | ResultFilter>(() => {
+    const fromUrl = searchParams.get("result") as ResultFilter | null;
+    return RESULT_OPTIONS.some((o) => o.value === fromUrl) ? (fromUrl as ResultFilter) : "";
+  });
   const [domain, setDomain] = useState<string>("");
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<"add" | "bulk" | null>(null);
@@ -126,6 +190,7 @@ export default function TargetsPage() {
     const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
     if (q) params.set("q", q);
     if (statusFilter) params.set("status", statusFilter);
+    if (resultFilter) params.set("result", resultFilter);
     if (domain) params.set("domain", domain);
     try {
       setData(await api.get<TargetPage>(`/targets?${params}`));
@@ -133,7 +198,7 @@ export default function TargetsPage() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [page, q, statusFilter, domain]);
+  }, [page, q, statusFilter, resultFilter, domain]);
 
   useEffect(() => {
     load();
@@ -143,7 +208,7 @@ export default function TargetsPage() {
     api.get<DomainGroup[]>("/targets/domains").then(setDomains).catch(() => setDomains([]));
   }, []);
 
-  useEffect(() => setPage(1), [q, statusFilter, domain]);
+  useEffect(() => setPage(1), [q, statusFilter, resultFilter, domain]);
 
   async function mutate(fn: () => Promise<unknown>, success?: string) {
     try {
@@ -195,6 +260,16 @@ export default function TargetsPage() {
             <option value="PAUSED">Paused</option>
             <option value="ARCHIVED">Archived</option>
           </select>
+          <select
+            aria-label="Scan result"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            value={resultFilter}
+            onChange={(e) => setResultFilter(e.target.value as "" | ResultFilter)}
+          >
+            {RESULT_OPTIONS.map((o) => (
+              <option key={o.value || "all"} value={o.value}>{o.label}</option>
+            ))}
+          </select>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -227,6 +302,7 @@ export default function TargetsPage() {
                 <tr>
                   <th className="px-4 py-3">Target</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Scan result</th>
                   <th className="px-4 py-3">Tags</th>
                   <th className="px-4 py-3">Risk</th>
                   <th className="px-4 py-3">Open findings</th>
@@ -242,6 +318,7 @@ export default function TargetsPage() {
                       <div className="text-xs text-slate-500">{t.url}</div>
                     </td>
                     <td className="px-4 py-3"><TargetStatusBadge status={t.status} /></td>
+                    <td className="px-4 py-3"><ScanResultCell target={t} /></td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {t.tags.map((tag) => (

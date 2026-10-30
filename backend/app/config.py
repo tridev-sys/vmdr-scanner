@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     nuclei_concurrency: int = 10
     # Hosts Nuclei works on in parallel per template (Nuclei's own default is 25).
     nuclei_bulk_size: int = 50
+    # Targets per Nuclei process, and how many processes run at once within one scan run.
+    scan_chunk_size: int = 10
+    scan_parallel_chunks: int = 3
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
     nuclei_severities: str = "critical,high,medium"

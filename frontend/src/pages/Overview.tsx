@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { Activity, AlertTriangle, Globe, Loader2, RefreshCw, Play, ShieldAlert, Shuffle, Square, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Activity, AlertTriangle, CheckCircle2, Globe, Loader2, RefreshCw, Play, ShieldAlert, Shuffle, Square, TrendingUp } from "lucide-react";
 import { Card, Button, ErrorText } from "../components/ui";
 import {
   api,
@@ -14,6 +15,7 @@ import {
   type Reachability,
   type ScanRun,
   type Stats,
+  type TargetPage,
 } from "../lib/api";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -96,6 +98,21 @@ function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+}
+
+/** mm:ss for a finished run's duration; em dash when the duration is not known. */
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+}
+
+/** Share of the run's targets already scanned, 0-100. */
+function runProgressPercent(run: ScanRun): number {
+  const total = run.targets_count;
+  if (!total || total <= 0) return 0;
+  return Math.min(100, Math.round(((run.targets_scanned ?? 0) / total) * 100));
 }
 
 /** Uniform random sample without repeats (partial Fisher-Yates). */
@@ -247,6 +264,29 @@ function LiveScanPanel() {
       </div>
       <ErrorText error={stopError} />
 
+      {run && (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-500">
+            <span className="tabular-nums">
+              {run.targets_scanned ?? 0} of {run.targets_count} targets
+              {(run.chunks_total ?? 0) > 0 && <> · chunk {run.chunks_done ?? 0} of {run.chunks_total}</>}
+            </span>
+            <span className="font-medium tabular-nums text-slate-700">{runProgressPercent(run)}%</span>
+          </div>
+          <div
+            className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100"
+            role="progressbar"
+            aria-label="Scan progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={runProgressPercent(run)}
+          >
+            <div className="h-full rounded-full bg-blue-600 transition-all duration-500" style={{ width: `${runProgressPercent(run)}%` }} />
+          </div>
+          <div className="mt-1.5 text-xs text-slate-500">{run.unreachable_count ?? 0} unreachable skipped</div>
+        </div>
+      )}
+
       <div className="mt-4 grid grid-cols-3 gap-3">
         {[
           { label: "Targets", value: run?.targets_count ?? 0 },
@@ -298,6 +338,25 @@ export default function OverviewPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cleanCount, setCleanCount] = useState<number | null>(null);
+
+  // Active targets whose last scan was clean. Only the total is used, so page_size=1 keeps it cheap.
+  useEffect(() => {
+    let cancelled = false;
+    const loadClean = () =>
+      api
+        .get<TargetPage>("/targets?status=ACTIVE&result=CLEAN&page_size=1")
+        .then((r) => {
+          if (!cancelled) setCleanCount(r.total);
+        })
+        .catch(() => undefined);
+    loadClean();
+    const id = setInterval(loadClean, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -374,7 +433,7 @@ export default function OverviewPage() {
         </div>
       )}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Monitored endpoints" value={stats.total_monitored_endpoints}
           icon={Globe} hint={`${stats.active_targets} active · ${stats.paused_targets} paused`} />
         <StatCard label="Active critical CVEs" value={stats.active_critical} icon={ShieldAlert}
@@ -383,6 +442,11 @@ export default function OverviewPage() {
           tone="text-sev-high" hint={stats.mttr_hours !== null ? `MTTR ${stats.mttr_hours}h (90d)` : "MTTR: no data yet"} />
         <StatCard label="Scans run (24h)" value={stats.scans_run_last_24h} icon={Activity}
           hint={`${stats.new_findings_last_24h} new findings today`} />
+        <Link to="/targets?result=CLEAN" className="block rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-300"
+          title="Show clean targets">
+          <StatCard label="Clean endpoints" value={cleanCount ?? "—"} icon={CheckCircle2} tone="text-emerald-600"
+            hint="active, last scan clean" />
+        </Link>
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -448,6 +512,7 @@ export default function OverviewPage() {
                   <th className="py-2 pr-4 text-right">Targets</th>
                   <th className="py-2 pr-4 text-right">Findings</th>
                   <th className="py-2 pr-4 text-right">New</th>
+                  <th className="py-2 pr-4 text-right">Duration</th>
                   <th className="py-2 pr-4">Started</th>
                 </tr>
               </thead>
@@ -465,6 +530,7 @@ export default function OverviewPage() {
                     <td className="py-2 pr-4 text-right tabular-nums">{r.targets_count}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{r.findings_count}</td>
                     <td className="py-2 pr-4 text-right tabular-nums">{r.new_findings}</td>
+                    <td className="py-2 pr-4 text-right font-mono tabular-nums text-slate-600">{formatDuration(r.duration_seconds)}</td>
                     <td className="py-2 pr-4 text-slate-500">{timeAgo(r.started_at ?? r.created_at)}</td>
                   </tr>
                 ))}

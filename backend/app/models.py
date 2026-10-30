@@ -61,6 +61,9 @@ class Target(SQLModel, table=True):
     consecutive_probe_failures: int = 0
     last_probed_at: datetime | None = None
     last_probe_error: str | None = Field(default=None, max_length=255)
+    # Result of the last completed scan: CLEAN (no open findings) or VULNERABLE. None if never scanned.
+    last_result: str | None = Field(default=None, max_length=16)
+    last_open_findings: int = 0
 
 
 class Vulnerability(SQLModel, table=True):
@@ -113,6 +116,9 @@ class ScanRun(SQLModel, table=True):
     cancel_requested: bool = False
     targets_count: int = 0
     unreachable_count: int = 0
+    targets_scanned: int = 0
+    chunks_total: int = 0
+    chunks_done: int = 0
     findings_count: int = 0
     new_findings: int = 0
     resolved_findings: int = 0
