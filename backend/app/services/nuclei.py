@@ -71,6 +71,8 @@ def build_command(
         "-o", str(output_file),
         "-silent",
         "-no-color",
+        # Progress lines go to the run log so a long scan shows what it is doing.
+        "-stats", "-stats-interval", "15",
     ]
     for path in templates or []:
         cmd += ["-t", path]

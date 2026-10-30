@@ -232,8 +232,10 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         window_dirs = recent_cve_dirs(root, window)
         if not window_dirs:
             log_line(session, run_id, f"No CVE templates found for the last {run.cve_years} year(s)", "WARN")
-        spec = ([("window", window_dirs, None)] if window_dirs else []) + [("non-cve", None, all_cve_dirs(root))]
-        log_line(session, run_id, f"CVE window: last {run.cve_years} year(s) {window}")
+        # CVE-only: a CVE window scans only CVE templates from that window. Non-CVE templates are
+        # not run (that second pass was thousands of templates and made quick scans take minutes).
+        spec = [("window", window_dirs, None)] if window_dirs else []
+        log_line(session, run_id, f"CVE-only scan: last {run.cve_years} year(s) {window}")
     else:
         # Newest CVEs first: pass 1 runs the newest years, pass 2 runs the rest.
         recent_dirs = recent_cve_dirs(root, [utcnow().year - i for i in range(settings.recent_cve_years)])

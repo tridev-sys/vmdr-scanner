@@ -63,19 +63,14 @@ def test_quick_preset_reaches_scanner_with_window_and_rate(pipeline, monkeypatch
     pipeline["scanner"].execute_run(body["id"])
 
     calls = _calls(pipeline["tmp"])
-    assert len(calls) == 2, calls  # window pass, then non-CVE pass
-    window, rest = calls
+    assert len(calls) == 1, calls  # CVE-only: the window pass, no non-CVE pass
+    window = calls[0]
     # Window pass: only the current-year CVE folder, at the preset rate.
     assert window[window.index("-t") + 1].endswith(f"http/cves/{year}")
     assert window.count("-t") == 1 and "-et" not in window
     assert window[window.index("-rate-limit") + 1] == "150"
     assert window[window.index("-severity") + 1] == "critical,high"
-    # Rest pass: every CVE folder excluded, nothing else restricted.
-    excluded = [rest[i + 1] for i, a in enumerate(rest) if a == "-et"]
-    assert any(p.endswith(f"http/cves/{year}") for p in excluded)
-    assert any(p.endswith(f"http/cves/{year - 15}") for p in excluded)
-    assert "-t" not in rest
-    assert rest[rest.index("-rate-limit") + 1] == "150"
+    assert "-stats" in window
 
     with Session(pipeline["db"].engine) as s:
         assert s.get(ScanRun, body["id"]).status == "COMPLETED"
