@@ -23,6 +23,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app ./app
+COPY scripts ./scripts
 
 # Non-root user. HOME matters: nuclei keeps templates in $HOME/nuclei-templates.
 # Ownership set here is copied into the named volumes on first use.
