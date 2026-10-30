@@ -152,6 +152,8 @@ def _run_passes(passes, timeout_s: int, should_stop) -> ProcessOutcome:
     """Run one chunk's passes in order (recent CVE templates first). Stops at the first bad pass."""
     last = ProcessOutcome(0)
     for cmd, _output, log_path, pid_path in passes:
+        if should_stop() or shutdown_event.is_set():
+            return ProcessOutcome(None, interrupted=True)  # never start a process after a stop
         outcome = run_process(cmd, log_path, timeout_s, shutdown_event, None, pid_path, should_stop)
         if outcome.interrupted or outcome.timed_out or outcome.returncode != 0:
             return outcome
@@ -250,10 +252,16 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
                 _run_passes, passes, settings.nuclei_run_timeout_s, lambda: _cancel_requested(run_id),
             )] = (index, count)
         while pending:
+            if shutdown_event.is_set() or _cancel_requested(run_id):
+                # Drop chunks that have not started yet; running ones are stopped by their own process loop.
+                for future in list(pending):
+                    future.cancel()
             # Wait in short slices so the heartbeat stays fresh during long chunks.
             done, _ = wait(list(pending), timeout=HEARTBEAT_INTERVAL_S, return_when=FIRST_COMPLETED)
             for future in done:
                 index, count = pending.pop(future)
+                if future.cancelled():
+                    continue
                 try:
                     outcome = future.result()
                 except FileNotFoundError:

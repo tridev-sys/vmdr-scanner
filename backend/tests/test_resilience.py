@@ -263,3 +263,41 @@ def test_status_lists_active_targets_only_while_running(pipeline):
         s.add(run)
         s.commit()
         assert get_scan_status(s).active_targets == []
+
+
+def test_cancel_with_queued_chunks_stops_quickly_without_starting_more(pipeline, monkeypatch):
+    """Regression: a cancel used to let queued chunks start, each running until it noticed the cancel."""
+    from app import config
+    from app.models import RunStatus, ScanRun
+    from app.services.targets import add_targets
+
+    db, scanner = pipeline["db"], pipeline["scanner"]
+    with Session(db.engine) as s:
+        add_targets(s, urls=["https://kai.buckleconsult.com", "https://clinic.heykoala.ai", "https://tour.heykoala.ai"])
+    _sleeping_nuclei(pipeline["tmp"], monkeypatch)
+    monkeypatch.setenv("VMDR_SCAN_CHUNK_SIZE", "1")
+    monkeypatch.setenv("VMDR_SCAN_PARALLEL_CHUNKS", "1")
+    config.get_settings.cache_clear()
+
+    run_id = _queue_run(db)
+    thread = threading.Thread(target=scanner.execute_run, args=(run_id,))
+    started = time.monotonic()
+    thread.start()
+    workdir = pipeline["tmp"] / "scans" / f"run-{run_id}"
+    _wait_for_pid(workdir)
+
+    with Session(db.engine) as s:
+        run = s.get(ScanRun, run_id)
+        run.cancel_requested = True
+        s.add(run)
+        s.commit()
+
+    thread.join(timeout=60)
+    assert not thread.is_alive()
+    assert time.monotonic() - started < 30, "cancel should stop the run, not run the queued chunks"
+    started_chunks = sorted(workdir.glob("nuclei_*_rest.log"))
+    assert len(started_chunks) == 1, "only the chunk that was already running may start"
+    with Session(db.engine) as s:
+        assert s.get(ScanRun, run_id).status == RunStatus.CANCELLED
+    config.get_settings.cache_clear()
+    scanner.shutdown_event.clear()
