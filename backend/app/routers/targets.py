@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, or_
+from sqlalchemy import String, cast, func, or_
 from sqlmodel import Session, select
 
 from app.auth import require_api_key
@@ -48,13 +48,13 @@ def list_targets(
     if domain:
         stmt = stmt.where(Target.domain_root == domain.lower())
     if tag:
-        stmt = stmt.where(Target.tags.cast(str).like(f'%"{tag}"%'))  # type: ignore[attr-defined]
+        stmt = stmt.where(cast(Target.tags, String).like(f'%"{tag}"%'))
     if q:
         needle = f"%{q.lower()}%"
         stmt = stmt.where(or_(
             func.lower(Target.url).like(needle),
             func.lower(Target.host).like(needle),
-            Target.tags.cast(str).like(needle),  # type: ignore[attr-defined]
+            cast(Target.tags, String).like(needle),
         ))
 
     total = session.exec(select(func.count()).select_from(stmt.subquery())).one()

@@ -167,3 +167,22 @@ def test_api_key_guards_writes(env, monkeypatch):
         assert ok.status_code == 201
         assert client.get("/api/targets").status_code == 200  # reads stay open
     config.get_settings.cache_clear()
+
+
+def test_targets_search_by_url_and_tag_does_not_500(tmp_path, monkeypatch):
+    """Regression: searching the list (q=...) or filtering by tag returned 500 (bad JSON column cast)."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    client = TestClient(app)
+    client.post("/api/targets", json={"url": "http://13.203.218.232:8080", "tags": ["regress-prod"]})
+    client.post("/api/targets", json={"url": "https://other.example.com", "tags": ["regress-dev"]})
+
+    def urls(params):
+        r = client.get("/api/targets", params=params)
+        assert r.status_code == 200
+        return [t["url"] for t in r.json()["items"]]
+
+    assert "http://13.203.218.232:8080" in urls({"q": "13.203.218.232"})
+    assert urls({"tag": "regress-dev"}) == ["https://other.example.com"]
+    assert "http://13.203.218.232:8080" in urls({"q": "regress-prod"})
