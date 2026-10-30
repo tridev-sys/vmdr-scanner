@@ -56,3 +56,13 @@ def test_build_command_matches_production_flags(tmp_path: Path):
     for flag in ("-list", "-rate-limit 50", "-concurrency 10", "-retries 1", "-timeout 5", "-jsonl", "-o"):
         assert flag in joined
     assert "-severity critical,high,medium" in joined
+
+
+def test_command_sets_bulk_size(tmp_path, monkeypatch):
+    from app import config
+    from app.services.nuclei import build_command
+    monkeypatch.setenv("VMDR_NUCLEI_BULK_SIZE", "50")
+    config.get_settings.cache_clear()
+    cmd = build_command(tmp_path / "t.txt", tmp_path / "o.jsonl", ["high"])
+    assert cmd[cmd.index("-bulk-size") + 1] == "50"
+    config.get_settings.cache_clear()

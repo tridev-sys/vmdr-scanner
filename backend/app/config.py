@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     nuclei_bin: str = "/usr/local/bin/nuclei"
     nuclei_rate_limit: int = 50
     nuclei_concurrency: int = 10
+    # Hosts Nuclei works on in parallel per template (Nuclei's own default is 25).
+    nuclei_bulk_size: int = 50
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
     nuclei_severities: str = "critical,high,medium"

@@ -42,6 +42,7 @@ def build_command(targets_file: Path, output_file: Path, severities: list[str]) 
         "-severity", ",".join(severities),
         "-rate-limit", str(s.nuclei_rate_limit),
         "-concurrency", str(s.nuclei_concurrency),
+        "-bulk-size", str(s.nuclei_bulk_size),
         "-retries", str(s.nuclei_retries),
         "-timeout", str(s.nuclei_timeout),
         "-jsonl",
