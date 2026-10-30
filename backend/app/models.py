@@ -119,6 +119,8 @@ class ScanRun(SQLModel, table=True):
     targets_scanned: int = 0
     chunks_total: int = 0
     chunks_done: int = 0
+    # CVE window in years (1, 2, 3, 5, 10). None means all CVE years.
+    cve_years: int | None = None
     findings_count: int = 0
     new_findings: int = 0
     resolved_findings: int = 0

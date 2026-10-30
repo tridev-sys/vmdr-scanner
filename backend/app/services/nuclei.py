@@ -42,6 +42,13 @@ def recent_cve_dirs(root: Path, years: list[int]) -> list[str]:
     return sorted(dirs)
 
 
+def all_cve_dirs(root: Path) -> list[str]:
+    """Every year-named CVE template directory, for excluding CVE templates from a pass."""
+    if not root.is_dir():
+        return []
+    return sorted(str(p) for p in root.glob("**/cves/*") if p.is_dir() and p.name.isdigit())
+
+
 def build_command(
     targets_file: Path,
     output_file: Path,

@@ -49,12 +49,13 @@ def trigger_scan(payload: ScanTrigger, session: Session = Depends(get_session)) 
         scope, target_id = RunScope.ALL, None
 
     run = ScanRun(scope=scope, target_id=target_id, target_ids=target_ids,
-                  severities=",".join(severities), requested_by="api")
+                  severities=",".join(severities), requested_by="api", cve_years=payload.cve_years)
     session.add(run)
     session.commit()
     session.refresh(run)
     count = f" ({len(target_ids)} targets)" if target_ids else ""
-    log_line(session, run.id, f"Queued {scope.lower()} scan via API{count}")
+    window = f", CVE window {payload.cve_years}y" if payload.cve_years else ""
+    log_line(session, run.id, f"Queued {scope.lower()} scan via API{count}{window}")
     return run_out(run)
 
 

@@ -84,6 +84,9 @@ class ScanTrigger(BaseModel):
     scope: Literal["all", "target", "targets"] = "all"
     target_id: int | None = None
     target_ids: list[int] | None = Field(default=None, description="Required for scope=targets.")
+    cve_years: Literal[1, 2, 3, 5, 10] | None = Field(
+        default=None, description="Only CVE templates from the latest N years. Omit for all years."
+    )
     severities: list[Severity] | None = Field(
         default=None, description="Defaults to VMDR_NUCLEI_SEVERITIES (critical,high,medium)."
     )
@@ -97,6 +100,7 @@ class ScanRunOut(BaseModel):
     targets_scanned: int = 0
     chunks_total: int = 0
     chunks_done: int = 0
+    cve_years: int | None = None
     duration_seconds: float | None = None
     status: str
     requested_by: str

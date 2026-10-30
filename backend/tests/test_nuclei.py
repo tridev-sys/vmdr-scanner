@@ -84,3 +84,20 @@ def test_build_command_templates_and_exclusions(tmp_path):
     cmd = build_command(tmp_path / "t", tmp_path / "o", ["high"], templates=["/x/2026"], exclude=["/x/2026", "/x/2025"])
     assert cmd.count("-t") == 1 and cmd[cmd.index("-t") + 1] == "/x/2026"
     assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-et"] == ["/x/2026", "/x/2025"]
+
+
+def test_all_cve_dirs_only_year_named(tmp_path):
+    from app.services.nuclei import all_cve_dirs
+    for path in ["http/cves/2026", "http/cves/2014", "code/cves/2025", "http/cves/misc"]:
+        (tmp_path / path).mkdir(parents=True)
+    dirs = all_cve_dirs(tmp_path)
+    assert len(dirs) == 3 and not any(d.endswith("misc") for d in dirs)
+
+
+def test_trigger_rejects_unsupported_cve_window(tmp_path, monkeypatch):
+    import pytest
+    from pydantic import ValidationError
+    from app.schemas import ScanTrigger
+    assert ScanTrigger(scope="all", cve_years=5).cve_years == 5
+    with pytest.raises(ValidationError):
+        ScanTrigger(scope="all", cve_years=4)

@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.db import engine
 from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStatus, WorkerState, WorkerStatus, utcnow
 from app.services.ingest import ingest
-from app.services.nuclei import build_command, parse_jsonl, recent_cve_dirs
+from app.services.nuclei import all_cve_dirs, build_command, parse_jsonl, recent_cve_dirs
 from app.services.probe import probe_urls
 from app.services.process import ProcessOutcome, run_process
 from app.services.webhooks import dispatch_alerts
@@ -206,28 +206,34 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         f"{min(settings.scan_parallel_chunks, len(chunks))} at a time, severities={run.severities}",
     )
 
-    # Newest CVEs first: pass 1 runs only the newest CVE template years, pass 2 runs the rest
-    # with those excluded, so every template still runs exactly once.
-    recent_years = [utcnow().year - i for i in range(settings.recent_cve_years)]
-    recent_dirs = recent_cve_dirs(Path(settings.nuclei_templates_dir), recent_years)
-    if recent_dirs:
-        log_line(session, run_id, f"Recent-first: {len(recent_dirs)} template dir(s) for {recent_years} run before the rest")
+    # Passes are (label, templates to run, templates to exclude). Each template runs at most once.
+    root = Path(settings.nuclei_templates_dir)
+    if run.cve_years:
+        # CVE window: pass 1 runs only CVE templates from the window (newest first);
+        # pass 2 runs everything else, excluding all CVE directories.
+        window = [utcnow().year - i for i in range(run.cve_years)]
+        window_dirs = recent_cve_dirs(root, window)
+        if not window_dirs:
+            log_line(session, run_id, f"No CVE templates found for the last {run.cve_years} year(s)", "WARN")
+        spec = ([("window", window_dirs, None)] if window_dirs else []) + [("non-cve", None, all_cve_dirs(root))]
+        log_line(session, run_id, f"CVE window: last {run.cve_years} year(s) {window}")
+    else:
+        # Newest CVEs first: pass 1 runs the newest years, pass 2 runs the rest.
+        recent_dirs = recent_cve_dirs(root, [utcnow().year - i for i in range(settings.recent_cve_years)])
+        if recent_dirs:
+            log_line(session, run_id, f"Recent-first: {len(recent_dirs)} template dir(s) run before the rest")
+        spec = ([("recent", recent_dirs, None)] if recent_dirs else []) + [("rest", None, recent_dirs)]
     severities = run.severities.split(",")
-    labels = (["recent"] if recent_dirs else []) + ["rest"]
 
     jobs = []
     for index, chunk in enumerate(chunks):
         targets_file = workdir / f"targets_{index:03d}.txt"
         targets_file.write_text("\n".join(t.url for t in chunk) + "\n", encoding="utf-8")
         passes = []
-        for label in labels:
+        for label, templates, exclude in spec:
             output = workdir / f"output_{index:03d}_{label}.jsonl"
             output.unlink(missing_ok=True)
-            cmd = build_command(
-                targets_file, output, severities,
-                templates=recent_dirs if label == "recent" else None,
-                exclude=None if label == "recent" else recent_dirs,
-            )
+            cmd = build_command(targets_file, output, severities, templates=templates, exclude=exclude)
             passes.append((cmd, output, workdir / f"nuclei_{index:03d}_{label}.log",
                            workdir / f"nuclei_{index:03d}_{label}.pid"))
         jobs.append((index, len(chunk), passes))

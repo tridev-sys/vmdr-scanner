@@ -26,6 +26,7 @@ ADDITIVE_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("targets_scanned", "INTEGER NOT NULL DEFAULT 0"),
         ("chunks_total", "INTEGER NOT NULL DEFAULT 0"),
         ("chunks_done", "INTEGER NOT NULL DEFAULT 0"),
+        ("cve_years", "INTEGER"),
     ],
 }
 

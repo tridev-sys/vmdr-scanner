@@ -56,11 +56,15 @@ export interface DomainGroup {
   count: number;
 }
 
+/** CVE publication window in years; null or omitted means all CVE years. */
+export type CveYears = 1 | 2 | 3 | 5 | 10;
+
 export interface ScanRun {
   id: number;
   scope: string;
   target_id: number | null;
   severities: string;
+  cve_years?: CveYears | null;
   status: string;
   requested_by: string;
   targets_count: number;
@@ -226,8 +230,8 @@ export function cancelScanRun(runId: number): Promise<ScanRun> {
   return api.post<ScanRun>(`/scans/${runId}/cancel`);
 }
 
-export function triggerTargetsScan(targetIds: number[]): Promise<ScanRun> {
-  return api.post<ScanRun>("/scans/trigger", { scope: "targets", target_ids: targetIds });
+export function triggerTargetsScan(targetIds: number[], cveYears?: CveYears | null): Promise<ScanRun> {
+  return api.post<ScanRun>("/scans/trigger", { scope: "targets", target_ids: targetIds, cve_years: cveYears ?? null });
 }
 
 /** Every ACTIVE target, walking the paginated /targets list (page_size is capped at 200 by the API). */

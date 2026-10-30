@@ -11,6 +11,7 @@ import {
   timeAgo,
   triggerTargetsScan,
   type ActiveTarget,
+  type CveYears,
   type LiveScanStatus,
   type Reachability,
   type ScanRun,
@@ -51,6 +52,21 @@ const LIVE_STATE: Record<string, { label: string; cls: string }> = {
 const POLL_ACTIVE_MS = 2000;
 const POLL_IDLE_MS = 15000;
 const SAMPLE_SIZE = 5;
+
+/** CVE window choices for the random scan. The select stores the string value; "all" maps to null. */
+const CVE_WINDOW_OPTIONS: { value: string; label: string; years: CveYears | null }[] = [
+  { value: "all", label: "All years", years: null },
+  { value: "1", label: "Last 1 year", years: 1 },
+  { value: "2", label: "Last 2 years", years: 2 },
+  { value: "3", label: "Last 3 years", years: 3 },
+  { value: "5", label: "Last 5 years", years: 5 },
+  { value: "10", label: "Last 10 years", years: 10 },
+];
+
+/** Human label for a run's CVE window. Runs created before the field existed have no value and read as all years. */
+function cveWindowLabel(years: number | null | undefined): string {
+  return years ? `CVE window: last ${years} ${years === 1 ? "year" : "years"}` : "All CVE years";
+}
 
 function StatCard({ label, value, icon: Icon, hint, tone }: {
   label: string;
@@ -147,6 +163,7 @@ function LiveScanPanel() {
   const [sampling, setSampling] = useState(false);
   const [sampleError, setSampleError] = useState<string | null>(null);
   const [sampleResult, setSampleResult] = useState<string | null>(null);
+  const [cveWindow, setCveWindow] = useState<string>("all");
 
   const load = useCallback(async () => {
     try {
@@ -192,8 +209,9 @@ function LiveScanPanel() {
       const targets = await fetchActiveTargets();
       if (targets.length === 0) throw new Error("No active targets to scan.");
       const picked = pickRandom(targets, Math.min(SAMPLE_SIZE, targets.length));
-      const queued = await triggerTargetsScan(picked.map((t) => t.id));
-      setSampleResult(`Queued run #${queued.id} over ${picked.length} random target${picked.length === 1 ? "" : "s"}.`);
+      const years = CVE_WINDOW_OPTIONS.find((o) => o.value === cveWindow)?.years ?? null;
+      const queued = await triggerTargetsScan(picked.map((t) => t.id), years);
+      setSampleResult(`Queued run #${queued.id} over ${picked.length} random target${picked.length === 1 ? "" : "s"} (${cveWindowLabel(years).toLowerCase()}).`);
       load();
     } catch (e) {
       setSampleError((e as Error).message);
@@ -239,6 +257,7 @@ function LiveScanPanel() {
                 <span className="font-medium tabular-nums">#{run.id}</span>{" "}
                 <span className={`font-medium ${RUN_STATUS_STYLE[run.status] ?? "text-slate-600"}`}>{run.status}</span>
                 {cancelRequested && <span className="ml-2 text-xs text-amber-700">cancel requested</span>}
+                <span className="ml-2 text-xs text-slate-500">{cveWindowLabel(run.cve_years)}</span>
               </div>
               {showTimer && startedAt !== undefined && (
                 <div className="mt-1 text-xs text-slate-500">
@@ -305,6 +324,20 @@ function LiveScanPanel() {
           {sampling ? <Loader2 size={14} className="animate-spin" /> : <Shuffle size={14} />}
           Scan {SAMPLE_SIZE} random targets
         </Button>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <span className="whitespace-nowrap">CVE window</span>
+          <select
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50"
+            value={cveWindow}
+            onChange={(e) => setCveWindow(e.target.value)}
+            disabled={active || sampling}
+            aria-label="CVE window for random scan"
+          >
+            {CVE_WINDOW_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
         {sampleResult && <span className="text-sm text-emerald-700">{sampleResult}</span>}
       </div>
       <ErrorText error={sampleError} />
@@ -522,6 +555,7 @@ export default function OverviewPage() {
                     <td className="py-2 pr-4 tabular-nums">#{r.id}</td>
                     <td className="py-2 pr-4">
                       {r.scope === "TARGET" ? `target ${r.target_id}` : r.scope === "TARGETS" ? "selected targets" : "all active"}
+                      <div className="text-xs text-slate-500">{cveWindowLabel(r.cve_years)}</div>
                     </td>
                     <td className="py-2 pr-4">
                       <span className={RUN_STATUS_STYLE[r.status] ?? "text-slate-600"}>{r.status}</span>
