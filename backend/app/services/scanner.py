@@ -56,12 +56,25 @@ def _finish(session: Session, run_id: int, status: str, error: str | None) -> No
     session.commit()
 
 
+def _cancel_requested(run_id: int) -> bool:
+    with Session(engine) as session:
+        run = session.get(ScanRun, run_id)
+        return bool(run and run.cancel_requested)
+
+
 def _select_targets(session: Session, run: ScanRun) -> list[Target]:
     if run.scope == RunScope.TARGET:
         target = session.get(Target, run.target_id) if run.target_id else None
         if target is None or target.status != TargetStatus.ACTIVE:
             return []
         return [target]
+    if run.scope == RunScope.TARGETS:
+        ids = run.target_ids or []
+        if not ids:
+            return []
+        return list(session.exec(
+            select(Target).where(Target.id.in_(ids), Target.status == TargetStatus.ACTIVE).order_by(Target.id)
+        ).all())
     return list(session.exec(
         select(Target).where(Target.status == TargetStatus.ACTIVE).order_by(Target.id)
     ).all())
@@ -143,6 +156,10 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     log_line(session, run_id, f"Probing {len(target_ids)} ACTIVE target(s)")
     reachable_ids, unreachable = _probe_and_split(session, target_ids)
+    if _cancel_requested(run_id):
+        _finish(session, run_id, RunStatus.CANCELLED, "cancelled by user")
+        log_line(session, run_id, "Cancelled by user before Nuclei started", "WARN")
+        return
     run = session.get(ScanRun, run_id)
     run.unreachable_count = len(unreachable)
     session.add(run)
@@ -177,6 +194,7 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         outcome = run_process(
             cmd, workdir / "nuclei.log", settings.nuclei_run_timeout_s, shutdown_event,
             on_heartbeat=heartbeat, pid_path=workdir / "nuclei.pid",
+            should_stop=lambda: _cancel_requested(run_id),
         )
     except FileNotFoundError:
         _finish(session, run_id, RunStatus.FAILED, f"nuclei binary not found at {settings.nuclei_bin}")
@@ -185,7 +203,11 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
 
     if outcome.interrupted:
         # Partial output is never ingested: a half-finished scan must not resolve anything.
-        _requeue_or_fail(session, run_id, "interrupted by worker shutdown")
+        if _cancel_requested(run_id):
+            _finish(session, run_id, RunStatus.CANCELLED, "cancelled by user")
+            log_line(session, run_id, "Scan cancelled by user; partial output discarded", "WARN")
+        else:
+            _requeue_or_fail(session, run_id, "interrupted by worker shutdown")
         return
 
     nuclei_log = workdir / "nuclei.log"

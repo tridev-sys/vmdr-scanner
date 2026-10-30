@@ -19,6 +19,8 @@ ADDITIVE_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "scan_runs": [
         ("attempts", "INTEGER NOT NULL DEFAULT 0"),
         ("unreachable_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("target_ids", "JSON"),
+        ("cancel_requested", "BOOLEAN NOT NULL DEFAULT 0"),
     ],
 }
 

@@ -1,7 +1,20 @@
 import { useEffect, useState, useCallback } from "react";
-import { Activity, AlertTriangle, Globe, Loader2, RefreshCw, Play, ShieldAlert, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Globe, Loader2, RefreshCw, Play, ShieldAlert, Shuffle, Square, TrendingUp } from "lucide-react";
 import { Card, Button, ErrorText } from "../components/ui";
-import { api, timeAgo, type Stats } from "../lib/api";
+import {
+  api,
+  cancelScanRun,
+  fetchActiveTargets,
+  getLiveScanStatus,
+  parseTs,
+  timeAgo,
+  triggerTargetsScan,
+  type ActiveTarget,
+  type LiveScanStatus,
+  type Reachability,
+  type ScanRun,
+  type Stats,
+} from "../lib/api";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const BAR_COLOR: Record<string, string> = {
@@ -11,6 +24,31 @@ const BAR_COLOR: Record<string, string> = {
   low: "bg-sev-low",
   info: "bg-sev-info",
 };
+
+const RUN_STATUS_STYLE: Record<string, string> = {
+  QUEUED: "text-slate-600",
+  RUNNING: "text-blue-700",
+  COMPLETED: "text-emerald-700",
+  FAILED: "text-red-600",
+  CANCELLED: "text-amber-700",
+};
+
+const REACHABILITY_STYLE: Record<Reachability, string> = {
+  REACHABLE: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  UNREACHABLE: "bg-red-50 text-red-700 ring-red-200",
+  UNKNOWN: "bg-slate-100 text-slate-600 ring-slate-200",
+};
+
+const LIVE_STATE: Record<string, { label: string; cls: string }> = {
+  IDLE: { label: "Idle", cls: "bg-slate-100 text-slate-700" },
+  SCANNING: { label: "Scanning", cls: "bg-blue-100 text-blue-800" },
+  UPDATING_TEMPLATES: { label: "Updating templates", cls: "bg-violet-100 text-violet-800" },
+  OFFLINE: { label: "Offline", cls: "bg-red-100 text-red-800" },
+};
+
+const POLL_ACTIVE_MS = 2000;
+const POLL_IDLE_MS = 15000;
+const SAMPLE_SIZE = 5;
 
 function StatCard({ label, value, icon: Icon, hint, tone }: {
   label: string;
@@ -46,6 +84,213 @@ function ScannerIndicator({ stats }: { stats: Stats }) {
       {m.label}
       {s.queue_length > 0 && <span className="text-slate-500">· {s.queue_length} queued</span>}
     </span>
+  );
+}
+
+function isRunActive(run: ScanRun | null | undefined): boolean {
+  return run?.status === "QUEUED" || run?.status === "RUNNING";
+}
+
+/** HH:MM:SS, clamped at zero so a small clock skew never shows a negative time. */
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+}
+
+/** Uniform random sample without repeats (partial Fisher-Yates). */
+function pickRandom<T>(items: T[], n: number): T[] {
+  const copy = items.slice();
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(Math.random() * (copy.length - i));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
+
+/** Ticks once per second. `offsetMs` is server clock minus client clock, so the result follows the server. */
+function ElapsedTimer({ startedAt, offsetMs }: { startedAt: number; offsetMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <span className="font-mono text-2xl font-semibold tabular-nums">
+      {formatElapsed(now + offsetMs - startedAt)}
+    </span>
+  );
+}
+
+function LiveScanPanel() {
+  const [snap, setSnap] = useState<{ status: LiveScanStatus; offsetMs: number } | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const [sampling, setSampling] = useState(false);
+  const [sampleError, setSampleError] = useState<string | null>(null);
+  const [sampleResult, setSampleResult] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const received = Date.now();
+      const status = await getLiveScanStatus();
+      const serverTime = parseTs(status.server_time);
+      setSnap({ status, offsetMs: serverTime ? serverTime.getTime() - received : 0 });
+      setPollError(null);
+    } catch (e) {
+      setPollError((e as Error).message);
+    }
+  }, []);
+
+  const run = snap?.status.current_run ?? null;
+  const active = isRunActive(run);
+
+  // Poll every 2s while a run is queued or running, otherwise at the slower idle interval.
+  useEffect(() => {
+    load();
+    const id = setInterval(load, active ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    return () => clearInterval(id);
+  }, [load, active]);
+
+  async function stop() {
+    if (!run) return;
+    setStopping(true);
+    setStopError(null);
+    try {
+      await cancelScanRun(run.id);
+    } catch (e) {
+      setStopError((e as Error).message);
+    } finally {
+      setStopping(false);
+      load();
+    }
+  }
+
+  async function scanRandom() {
+    setSampling(true);
+    setSampleError(null);
+    setSampleResult(null);
+    try {
+      const targets = await fetchActiveTargets();
+      if (targets.length === 0) throw new Error("No active targets to scan.");
+      const picked = pickRandom(targets, Math.min(SAMPLE_SIZE, targets.length));
+      const queued = await triggerTargetsScan(picked.map((t) => t.id));
+      setSampleResult(`Queued run #${queued.id} over ${picked.length} random target${picked.length === 1 ? "" : "s"}.`);
+      load();
+    } catch (e) {
+      setSampleError((e as Error).message);
+    } finally {
+      setSampling(false);
+    }
+  }
+
+  if (!snap) {
+    return (
+      <Card className="p-5">
+        <h2 className="text-sm font-semibold">Live scan</h2>
+        <ErrorText error={pollError} />
+        {!pollError && <p className="mt-2 text-sm text-slate-500">Loading scan status…</p>}
+      </Card>
+    );
+  }
+
+  const { status, offsetMs } = snap;
+  const badge = LIVE_STATE[status.state] ?? LIVE_STATE.IDLE;
+  const cancelRequested = run?.cancel_requested === true;
+  const canStop = active && !stopping && !cancelRequested;
+  const showTimer = run?.status === "RUNNING" && run.started_at !== null;
+  const startedAt = parseTs(run?.started_at)?.getTime();
+  const targets: ActiveTarget[] = status.active_targets;
+
+  return (
+    <Card className="p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">Live scan</h2>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${badge.cls}`}>
+          {(status.state === "SCANNING" || status.state === "UPDATING_TEMPLATES") && <Loader2 size={12} className="animate-spin" />}
+          {badge.label}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          {run ? (
+            <>
+              <div className="text-sm">
+                <span className="text-slate-500">Run</span>{" "}
+                <span className="font-medium tabular-nums">#{run.id}</span>{" "}
+                <span className={`font-medium ${RUN_STATUS_STYLE[run.status] ?? "text-slate-600"}`}>{run.status}</span>
+                {cancelRequested && <span className="ml-2 text-xs text-amber-700">cancel requested</span>}
+              </div>
+              {showTimer && startedAt !== undefined && (
+                <div className="mt-1 text-xs text-slate-500">
+                  Elapsed <ElapsedTimer key={run.id} startedAt={startedAt} offsetMs={offsetMs} />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-sm text-slate-500">No run in progress.</div>
+          )}
+        </div>
+        <Button variant="danger" onClick={stop} disabled={!canStop} className="px-4 py-2 text-base">
+          {stopping || cancelRequested ? (
+            <>
+              <Loader2 size={14} className="animate-spin" /> Stopping…
+            </>
+          ) : (
+            <>
+              <Square size={14} /> Stop scan
+            </>
+          )}
+        </Button>
+      </div>
+      <ErrorText error={stopError} />
+
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {[
+          { label: "Targets", value: run?.targets_count ?? 0 },
+          { label: "Unreachable", value: run?.unreachable_count ?? 0 },
+          { label: "Live findings", value: status.live_findings ?? "—" },
+        ].map((c) => (
+          <div key={c.label} className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="text-xs text-slate-500">{c.label}</div>
+            <div className="text-xl font-semibold tabular-nums">{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <Button variant="secondary" onClick={scanRandom} disabled={active || sampling}>
+          {sampling ? <Loader2 size={14} className="animate-spin" /> : <Shuffle size={14} />}
+          Scan {SAMPLE_SIZE} random targets
+        </Button>
+        {sampleResult && <span className="text-sm text-emerald-700">{sampleResult}</span>}
+      </div>
+      <ErrorText error={sampleError} />
+      <ErrorText error={pollError} />
+
+      <div className="mt-5">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Actively scanning</h3>
+        {targets.length === 0 ? (
+          <p className="text-sm text-slate-500">No active scan.</p>
+        ) : (
+          <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-100">
+            {targets.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium" title={t.url}>{t.url}</div>
+                  <div className="truncate text-xs text-slate-500">{t.host}</div>
+                </div>
+                <span className={`inline-flex shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${REACHABILITY_STYLE[t.reachability] ?? REACHABILITY_STYLE.UNKNOWN}`}>
+                  {t.reachability.toLowerCase()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -119,6 +364,8 @@ export default function OverviewPage() {
       </header>
 
       <ErrorText error={error} />
+
+      <LiveScanPanel />
 
       {stats.spike && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -208,11 +455,11 @@ export default function OverviewPage() {
                 {stats.scanner.recent_runs.map((r) => (
                   <tr key={r.id}>
                     <td className="py-2 pr-4 tabular-nums">#{r.id}</td>
-                    <td className="py-2 pr-4">{r.scope === "TARGET" ? `target ${r.target_id}` : "all active"}</td>
                     <td className="py-2 pr-4">
-                      <span className={r.status === "FAILED" ? "text-red-600" : r.status === "COMPLETED" ? "text-emerald-700" : "text-slate-600"}>
-                        {r.status}
-                      </span>
+                      {r.scope === "TARGET" ? `target ${r.target_id}` : r.scope === "TARGETS" ? "selected targets" : "all active"}
+                    </td>
+                    <td className="py-2 pr-4">
+                      <span className={RUN_STATUS_STYLE[r.status] ?? "text-slate-600"}>{r.status}</span>
                       {r.error && <div className="max-w-xs truncate text-xs text-red-500" title={r.error}>{r.error}</div>}
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums">{r.targets_count}</td>

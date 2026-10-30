@@ -6,7 +6,8 @@ from pathlib import Path
 from sqlmodel import Session, func, select
 
 from app.models import RunStatus, ScanLog, ScanRun, WorkerState, WorkerStatus, utcnow
-from app.schemas import LogOut, ScanRunOut, ScanStatus, TemplateStatus
+from app.models import RunScope, Target, TargetStatus
+from app.schemas import ActiveTarget, LogOut, ScanRunOut, ScanStatus, TemplateStatus
 
 HEARTBEAT_STALE_AFTER = timedelta(minutes=2)
 
@@ -20,6 +21,19 @@ def _count_lines(path: str | None) -> int | None:
         return None
     with open(path, "rb") as fh:
         return sum(1 for _ in fh)
+
+
+def _active_targets(session: Session, run: ScanRun | None) -> list[ActiveTarget]:
+    if run is None or run.status != RunStatus.RUNNING:
+        return []
+    if run.scope == RunScope.ALL:
+        query = select(Target).where(Target.status == TargetStatus.ACTIVE)
+    elif run.scope == RunScope.TARGET:
+        query = select(Target).where(Target.id == run.target_id)
+    else:
+        query = select(Target).where(Target.id.in_(run.target_ids or []))
+    rows = session.exec(query.order_by(Target.id)).all()
+    return [ActiveTarget(id=t.id, url=t.url, host=t.host, reachability=t.reachability) for t in rows]
 
 
 def get_scan_status(session: Session, log_limit: int = 100) -> ScanStatus:
@@ -59,6 +73,8 @@ def get_scan_status(session: Session, log_limit: int = 100) -> ScanStatus:
         worker_online=online,
         heartbeat_at=state.heartbeat_at,
         current_run=run_out(current) if current else None,
+        active_targets=_active_targets(session, current),
+        server_time=now,
         live_findings=_count_lines(current.output_path) if current and current.status == RunStatus.RUNNING else None,
         queue_length=queue_length,
         templates=TemplateStatus(

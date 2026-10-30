@@ -62,6 +62,25 @@ export interface ScanRun {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  unreachable_count?: number;
+  cancel_requested?: boolean;
+}
+
+export type RunStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
+export type Reachability = "UNKNOWN" | "REACHABLE" | "UNREACHABLE";
+
+export interface ActiveTarget {
+  id: number;
+  url: string;
+  host: string;
+  reachability: Reachability;
+}
+
+/** Response of GET /api/scans/status (live view used by the Overview scan panel). */
+export interface LiveScanStatus extends Omit<ScanStatus, "logs"> {
+  active_targets: ActiveTarget[];
+  /** Server clock (ISO string), used to correct the client clock for the elapsed timer. */
+  server_time: string | null;
 }
 
 export interface LogLine {
@@ -185,6 +204,30 @@ export const api = {
   patch: <T,>(path: string, body: unknown) => request<T>("PATCH", path, body),
   del: (path: string) => request<void>("DELETE", path),
 };
+
+export function getLiveScanStatus(): Promise<LiveScanStatus> {
+  return api.get<LiveScanStatus>("/scans/status");
+}
+
+export function cancelScanRun(runId: number): Promise<ScanRun> {
+  return api.post<ScanRun>(`/scans/${runId}/cancel`);
+}
+
+export function triggerTargetsScan(targetIds: number[]): Promise<ScanRun> {
+  return api.post<ScanRun>("/scans/trigger", { scope: "targets", target_ids: targetIds });
+}
+
+/** Every ACTIVE target, walking the paginated /targets list (page_size is capped at 200 by the API). */
+export async function fetchActiveTargets(): Promise<Target[]> {
+  const pageSize = 200;
+  const all: Target[] = [];
+  for (let page = 1; ; page++) {
+    const res = await api.get<TargetPage>(`/targets?status=ACTIVE&page_size=${pageSize}&page=${page}`);
+    all.push(...res.items);
+    if (res.items.length < pageSize || all.length >= res.total) break;
+  }
+  return all;
+}
 
 /** Backend timestamps are naive UTC; append Z so the browser converts them to local time. */
 export function parseTs(value: string | null | undefined): Date | null {

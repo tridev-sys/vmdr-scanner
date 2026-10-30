@@ -53,6 +53,7 @@ def run_process(
     stop_event: threading.Event,
     on_heartbeat: Callable[[], None] | None = None,
     pid_path: Path | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> ProcessOutcome:
     """Run `cmd`, writing stdout+stderr to `log_path`. Raises FileNotFoundError if the binary is missing."""
     with log_path.open("w", encoding="utf-8") as fh:
@@ -67,8 +68,8 @@ def run_process(
                 return ProcessOutcome(returncode)
             except subprocess.TimeoutExpired:
                 pass
-            if stop_event.is_set():
-                logger.warning("shutdown requested; terminating pid %s", proc.pid)
+            if stop_event.is_set() or (should_stop is not None and should_stop()):
+                logger.warning("stop requested; terminating pid %s", proc.pid)
                 terminate_group(proc)
                 return ProcessOutcome(proc.returncode, interrupted=True)
             if time.monotonic() >= deadline:

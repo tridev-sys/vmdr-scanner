@@ -27,11 +27,13 @@ class RunStatus:
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class RunScope:
     ALL = "ALL"
     TARGET = "TARGET"
+    TARGETS = "TARGETS"  # an explicit list of targets, stored in ScanRun.target_ids
 
 
 class WorkerStatus:
@@ -105,6 +107,10 @@ class ScanRun(SQLModel, table=True):
     requested_by: str = Field(default="api", max_length=64)
     # Times this run has been started. Interrupted runs are re-queued until MAX_RUN_ATTEMPTS.
     attempts: int = 0
+    # Explicit target selection for scope=TARGETS (e.g. a random sample).
+    target_ids: list[int] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # Set by the API on a RUNNING run; the worker stops Nuclei within one heartbeat slice.
+    cancel_requested: bool = False
     targets_count: int = 0
     unreachable_count: int = 0
     findings_count: int = 0

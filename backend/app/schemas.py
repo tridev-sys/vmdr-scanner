@@ -75,8 +75,9 @@ class DomainGroup(BaseModel):
 
 # ---------- Scans ----------
 class ScanTrigger(BaseModel):
-    scope: Literal["all", "target"] = "all"
+    scope: Literal["all", "target", "targets"] = "all"
     target_id: int | None = None
+    target_ids: list[int] | None = Field(default=None, description="Required for scope=targets.")
     severities: list[Severity] | None = Field(
         default=None, description="Defaults to VMDR_NUCLEI_SEVERITIES (critical,high,medium)."
     )
@@ -90,6 +91,9 @@ class ScanRunOut(BaseModel):
     status: str
     requested_by: str
     targets_count: int
+    unreachable_count: int = 0
+    target_ids: list[int] | None = None
+    cancel_requested: bool = False
     findings_count: int
     new_findings: int
     resolved_findings: int
@@ -97,6 +101,13 @@ class ScanRunOut(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class ActiveTarget(BaseModel):
+    id: int
+    url: str
+    host: str
+    reachability: str
 
 
 class LogOut(BaseModel):
@@ -119,6 +130,10 @@ class ScanStatus(BaseModel):
     worker_online: bool
     heartbeat_at: datetime | None
     current_run: ScanRunOut | None
+    # Targets the current run is scanning (or probing). Empty when idle.
+    active_targets: list[ActiveTarget] = []
+    # Server clock, so the UI can show an elapsed timer that is not skewed by the browser clock.
+    server_time: datetime | None = None
     live_findings: int | None = None
     queue_length: int
     templates: TemplateStatus
