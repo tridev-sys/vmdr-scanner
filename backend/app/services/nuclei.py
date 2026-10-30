@@ -55,13 +55,14 @@ def build_command(
     severities: list[str],
     templates: list[str] | None = None,
     exclude: list[str] | None = None,
+    rate_limit: int | None = None,
 ) -> list[str]:
     s = get_settings()
     cmd = [
         s.nuclei_bin,
         "-list", str(targets_file),
         "-severity", ",".join(severities),
-        "-rate-limit", str(s.nuclei_rate_limit),
+        "-rate-limit", str(rate_limit or s.nuclei_rate_limit),
         "-concurrency", str(s.nuclei_concurrency),
         "-bulk-size", str(s.nuclei_bulk_size),
         "-retries", str(s.nuclei_retries),

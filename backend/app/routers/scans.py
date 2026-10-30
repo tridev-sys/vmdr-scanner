@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import RunScope, RunStatus, ScanRun, Target, TargetStatus, WorkerState, utcnow
 from app.schemas import ScanRunOut, ScanStatus, ScanTrigger
+from app.services.presets import PRESETS
 from app.services.scanner import log_line, set_worker_state
 from app.services.status import get_scan_status, run_out
 
@@ -17,6 +18,12 @@ router = APIRouter(prefix="/scans", tags=["scans"])
 def trigger_scan(payload: ScanTrigger, session: Session = Depends(get_session)) -> ScanRunOut:
     """Queue a scan. The worker picks it up within VMDR_WORKER_POLL_SECONDS."""
     severities = payload.severities or get_settings().severity_list
+    cve_years, rate_limit = payload.cve_years, None
+    if payload.preset:
+        preset = PRESETS[payload.preset]
+        cve_years, rate_limit = preset["cve_years"], preset["rate_limit"]
+        if preset["severities"]:
+            severities = preset["severities"]
     target_ids: list[int] | None = None
     if payload.scope == "target":
         if payload.target_id is None:
@@ -49,12 +56,13 @@ def trigger_scan(payload: ScanTrigger, session: Session = Depends(get_session)) 
         scope, target_id = RunScope.ALL, None
 
     run = ScanRun(scope=scope, target_id=target_id, target_ids=target_ids,
-                  severities=",".join(severities), requested_by="api", cve_years=payload.cve_years)
+                  severities=",".join(severities), requested_by="api", cve_years=cve_years,
+                  preset=payload.preset, rate_limit=rate_limit)
     session.add(run)
     session.commit()
     session.refresh(run)
     count = f" ({len(target_ids)} targets)" if target_ids else ""
-    window = f", CVE window {payload.cve_years}y" if payload.cve_years else ""
+    window = f", CVE window {cve_years}y" if cve_years else ""
     log_line(session, run.id, f"Queued {scope.lower()} scan via API{count}{window}")
     return run_out(run)
 

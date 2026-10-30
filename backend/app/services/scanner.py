@@ -233,7 +233,8 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         for label, templates, exclude in spec:
             output = workdir / f"output_{index:03d}_{label}.jsonl"
             output.unlink(missing_ok=True)
-            cmd = build_command(targets_file, output, severities, templates=templates, exclude=exclude)
+            cmd = build_command(targets_file, output, severities, templates=templates, exclude=exclude,
+                                rate_limit=run.rate_limit)
             passes.append((cmd, output, workdir / f"nuclei_{index:03d}_{label}.log",
                            workdir / f"nuclei_{index:03d}_{label}.pid"))
         jobs.append((index, len(chunk), passes))

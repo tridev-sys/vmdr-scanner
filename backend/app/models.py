@@ -121,6 +121,8 @@ class ScanRun(SQLModel, table=True):
     chunks_done: int = 0
     # CVE window in years (1, 2, 3, 5, 10). None means all CVE years.
     cve_years: int | None = None
+    preset: str | None = Field(default=None, max_length=16)
+    rate_limit: int | None = None
     findings_count: int = 0
     new_findings: int = 0
     resolved_findings: int = 0

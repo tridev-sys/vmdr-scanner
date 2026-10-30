@@ -101,3 +101,21 @@ def test_trigger_rejects_unsupported_cve_window(tmp_path, monkeypatch):
     assert ScanTrigger(scope="all", cve_years=5).cve_years == 5
     with pytest.raises(ValidationError):
         ScanTrigger(scope="all", cve_years=4)
+
+
+def test_presets_map_to_expected_settings():
+    from app.services.presets import PRESETS
+    assert PRESETS["quick"]["cve_years"] == 1 and PRESETS["quick"]["severities"] == ["critical", "high"]
+    assert PRESETS["medium3"]["cve_years"] == 3 and PRESETS["medium5"]["cve_years"] == 5
+    assert PRESETS["full"]["cve_years"] == 10
+    assert PRESETS["deep"]["cve_years"] is None
+
+
+def test_build_command_uses_run_rate_limit(tmp_path, monkeypatch):
+    from app import config
+    from app.services.nuclei import build_command
+    monkeypatch.setenv("VMDR_NUCLEI_RATE_LIMIT", "50")
+    config.get_settings.cache_clear()
+    cmd = build_command(tmp_path / "t", tmp_path / "o", ["high"], rate_limit=150)
+    assert cmd[cmd.index("-rate-limit") + 1] == "150"
+    config.get_settings.cache_clear()

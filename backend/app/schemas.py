@@ -87,6 +87,9 @@ class ScanTrigger(BaseModel):
     cve_years: Literal[1, 2, 3, 5, 10] | None = Field(
         default=None, description="Only CVE templates from the latest N years. Omit for all years."
     )
+    preset: Literal["quick", "medium3", "medium5", "full", "deep"] | None = Field(
+        default=None, description="Named preset. Overrides cve_years, severities, and rate limit."
+    )
     severities: list[Severity] | None = Field(
         default=None, description="Defaults to VMDR_NUCLEI_SEVERITIES (critical,high,medium)."
     )
@@ -101,6 +104,8 @@ class ScanRunOut(BaseModel):
     chunks_total: int = 0
     chunks_done: int = 0
     cve_years: int | None = None
+    preset: str | None = None
+    rate_limit: int | None = None
     duration_seconds: float | None = None
     status: str
     requested_by: str

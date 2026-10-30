@@ -56,8 +56,22 @@ export interface DomainGroup {
   count: number;
 }
 
-/** CVE publication window in years; null or omitted means all CVE years. */
+/** Legacy CVE publication window in years (superseded by ScanPreset; still read for older runs). */
 export type CveYears = 1 | 2 | 3 | 5 | 10;
+
+/** Scan presets accepted by POST /api/scans/trigger. Omitting the preset uses the server defaults. */
+export type ScanPreset = "quick" | "medium3" | "medium5" | "full" | "deep";
+
+/** Options for the "Scan preset" select, in display order. "quick" is the default. */
+export const PRESET_OPTIONS: { value: ScanPreset; label: string }[] = [
+  { value: "quick", label: "Quick (1 year, critical + high)" },
+  { value: "medium3", label: "Medium (3 years)" },
+  { value: "medium5", label: "Medium (5 years)" },
+  { value: "full", label: "Full (10 years)" },
+  { value: "deep", label: "Deep (all years)" },
+];
+
+export const DEFAULT_PRESET: ScanPreset = "quick";
 
 export interface ScanRun {
   id: number;
@@ -65,6 +79,8 @@ export interface ScanRun {
   target_id: number | null;
   severities: string;
   cve_years?: CveYears | null;
+  preset?: ScanPreset | null;
+  rate_limit?: number | null;
   status: string;
   requested_by: string;
   targets_count: number;
@@ -230,8 +246,8 @@ export function cancelScanRun(runId: number): Promise<ScanRun> {
   return api.post<ScanRun>(`/scans/${runId}/cancel`);
 }
 
-export function triggerTargetsScan(targetIds: number[], cveYears?: CveYears | null): Promise<ScanRun> {
-  return api.post<ScanRun>("/scans/trigger", { scope: "targets", target_ids: targetIds, cve_years: cveYears ?? null });
+export function triggerTargetsScan(targetIds: number[], preset?: ScanPreset | null): Promise<ScanRun> {
+  return api.post<ScanRun>("/scans/trigger", { scope: "targets", target_ids: targetIds, preset: preset ?? null });
 }
 
 /** Every ACTIVE target, walking the paginated /targets list (page_size is capped at 200 by the API). */
