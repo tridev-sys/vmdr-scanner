@@ -13,7 +13,8 @@ WorkingDirectory=/opt/vmdr/backend
 EnvironmentFile=/etc/vmdr/vmdr.env
 Environment=HOME=/var/lib/vmdr/home
 ExecStart=/opt/vmdr/venv/bin/python -m app.worker
-# SIGTERM lets the loop finish its current step; a scan in progress gets up to 60s before SIGKILL.
+# SIGTERM stops an in-progress Nuclei scan within ~10s (process group TERM, then KILL) and re-queues
+# the run. 60s leaves room for that before systemd escalates.
 KillSignal=SIGTERM
 TimeoutStopSec=60
 Restart=always

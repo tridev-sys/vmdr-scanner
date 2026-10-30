@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { ExternalLink, Search, X } from "lucide-react";
-import { Button, Card, EmptyState, ErrorText, Input, SeverityBadge, VulnStatusBadge } from "../components/ui";
+import { Button, Card, ErrorText, Input, SeverityBadge, VulnStatusBadge } from "../components/ui";
 import { api, formatDate, timeAgo, type VulnPage, type Vulnerability, type VulnStatus, type DomainGroup } from "../lib/api";
+import { CVSS_BANDS, cvssBand, type CvssBand } from "../lib/severity";
 
 const PAGE_SIZE = 25;
 const SEVERITY_OPTIONS = ["critical", "high", "medium", "low", "info"];
@@ -27,6 +28,46 @@ function Snippet({ title, body }: { title: string; body: string | null }) {
     <div>
       <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">{title}</div>
       <pre className="max-h-64 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100 whitespace-pre-wrap break-all">{body}</pre>
+    </div>
+  );
+}
+
+function groupByBand(items: Vulnerability[]): Record<CvssBand, Vulnerability[]> {
+  const out: Record<CvssBand, Vulnerability[]> = { LOW: [], MEDIUM: [], HIGH: [], CRITICAL: [] };
+  for (const v of items) out[cvssBand(v.cvss_score, v.severity)].push(v);
+  return out;
+}
+
+function FindingsTable({ items, onSelect }: { items: Vulnerability[]; onSelect: (v: Vulnerability) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <tr>
+            <th className="px-4 py-3">Severity</th>
+            <th className="px-4 py-3">Finding</th>
+            <th className="px-4 py-3">Matched host</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">CVSS</th>
+            <th className="px-4 py-3">Last seen</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {items.map((v) => (
+            <tr key={v.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onSelect(v)}>
+              <td className="px-4 py-3"><SeverityBadge severity={v.severity} /></td>
+              <td className="px-4 py-3">
+                <div className="font-medium">{v.cve_id ?? v.template_id}</div>
+                <div className="max-w-md truncate text-xs text-slate-500">{v.name}</div>
+              </td>
+              <td className="px-4 py-3 text-xs text-slate-600">{v.target_url.replace(/^https?:\/\//, "")}</td>
+              <td className="px-4 py-3"><VulnStatusBadge status={v.status} /></td>
+              <td className="px-4 py-3 tabular-nums">{v.cvss_score ?? "—"}</td>
+              <td className="px-4 py-3 text-slate-500">{timeAgo(v.last_seen_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -173,6 +214,7 @@ export default function VulnerabilitiesPage() {
   }
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
+  const grouped = data ? groupByBand(data.items) : null;
 
   return (
     <div className="space-y-5">
@@ -204,43 +246,34 @@ export default function VulnerabilitiesPage() {
         </div>
       </Card>
 
-      <Card className="overflow-hidden">
-        {!data ? (
-          <div className="p-6 text-sm text-slate-500">Loading…</div>
-        ) : data.items.length === 0 ? (
-          <EmptyState>No findings match these filters.</EmptyState>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Severity</th>
-                  <th className="px-4 py-3">Finding</th>
-                  <th className="px-4 py-3">Matched host</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">CVSS</th>
-                  <th className="px-4 py-3">Last seen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {data.items.map((v) => (
-                  <tr key={v.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelected(v)}>
-                    <td className="px-4 py-3"><SeverityBadge severity={v.severity} /></td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{v.cve_id ?? v.template_id}</div>
-                      <div className="max-w-md truncate text-xs text-slate-500">{v.name}</div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">{v.target_url.replace(/^https?:\/\//, "")}</td>
-                    <td className="px-4 py-3"><VulnStatusBadge status={v.status} /></td>
-                    <td className="px-4 py-3 tabular-nums">{v.cvss_score ?? "—"}</td>
-                    <td className="px-4 py-3 text-slate-500">{timeAgo(v.last_seen_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+      {!data ? (
+        <Card className="p-6 text-sm text-slate-500">Loading…</Card>
+      ) : (
+        <div className="space-y-5">
+          <p className="text-xs text-slate-500">
+            Grouped by CVSS v3 base score. Counts cover the {data.items.length} findings on this page ({data.total} match the filters).
+          </p>
+          {grouped && CVSS_BANDS.map(({ band, range }) => {
+            const items = grouped[band];
+            return (
+              <Card key={band} className="overflow-hidden">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                  <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                    <SeverityBadge severity={band.toLowerCase()} />
+                    <span className="font-normal text-slate-500">CVSS {range}</span>
+                  </h2>
+                  <span className="text-sm font-semibold tabular-nums" aria-label={`${items.length} findings`}>{items.length}</span>
+                </div>
+                {items.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-400">No findings</div>
+                ) : (
+                  <FindingsTable items={items} onSelect={setSelected} />
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       {data && data.total > PAGE_SIZE && (
         <div className="flex items-center justify-between text-sm text-slate-600">

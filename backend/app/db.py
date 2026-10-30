@@ -33,8 +33,10 @@ engine = _make_engine()
 
 def init_db() -> None:
     from app import models  # noqa: F401  (registers tables)
+    from app.migrations import migrate
 
     SQLModel.metadata.create_all(engine)
+    migrate(engine)
 
 
 def get_session() -> Iterator[Session]:

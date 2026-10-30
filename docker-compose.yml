@@ -12,7 +12,7 @@ services:
     env_file: .env
     volumes:
       - vmdr-data:/data
-    networks: [vmdr-net]
+    networks: [vmdr-edge, vmdr-egress]
     deploy:
       resources:
         limits: {cpus: "${API_CPUS}", memory: "${API_MEMORY}", pids: "${API_PIDS}"}
@@ -32,8 +32,8 @@ services:
     env_file: .env
     volumes:
       - vmdr-data:/data
-      - nuclei-templates:/home/vmdr/nuclei-templates
-    networks: [vmdr-net]
+      - vmdr-nuclei-templates:/home/vmdr/nuclei-templates
+    networks: [vmdr-egress]
     depends_on:
       web-api:
         condition: service_healthy
@@ -47,19 +47,28 @@ services:
     build: ./frontend
     ports:
       - "${HTTP_PORT}:80"
-    networks: [vmdr-net]
+    networks: [vmdr-edge]
     depends_on: [web-api]
     deploy:
       resources:
         limits: {cpus: "${FRONTEND_CPUS}", memory: "${FRONTEND_MEMORY}", pids: "${FRONTEND_PIDS}"}
     restart: unless-stopped
 
+# Networks (separate on purpose):
+#   vmdr-edge    frontend <-> web-api only. The browser-facing side; the worker is not on it.
+#   vmdr-egress  web-api and scanner-worker. The worker needs outbound access to scan targets.
+#                The frontend is not on it, so it cannot reach the worker or the internet.
 networks:
-  vmdr-net:
-    name: vmdr-net
+  vmdr-edge:
+    name: vmdr-edge
+  vmdr-egress:
+    name: vmdr-egress
 
+# Volumes (separate on purpose):
+#   vmdr-data                  SQLite database and scan output. Shared by web-api and scanner-worker.
+#   vmdr-nuclei-templates      Nuclei template cache. Only scanner-worker mounts it.
 volumes:
   vmdr-data:
     name: vmdr-data
-  nuclei-templates:
+  vmdr-nuclei-templates:
     name: vmdr-nuclei-templates

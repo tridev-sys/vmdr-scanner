@@ -2,12 +2,13 @@
 
 import json
 import logging
-import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.config import get_settings
+from app.services.process import run_process
 from app.utils import SEVERITIES, hostname_of
 
 logger = logging.getLogger(__name__)
@@ -50,20 +51,22 @@ def build_command(targets_file: Path, output_file: Path, severities: list[str]) 
     ]
 
 
-def update_templates() -> tuple[bool, str]:
-    """Run `nuclei -update-templates`. Returns (ok, last output lines)."""
+def update_templates(stop_event: threading.Event | None = None, log_path: Path | None = None) -> tuple[bool, str]:
+    """Run `nuclei -update-templates`. Returns (ok, last output lines). An interrupted update returns (False, "interrupted")."""
     s = get_settings()
     cmd = [s.nuclei_bin, "-update-templates", "-silent", "-no-color"]
+    log_path = log_path or Path(s.scan_workdir) / "template-update.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=s.nuclei_template_update_timeout_s
-        )
+        outcome = run_process(cmd, log_path, s.nuclei_template_update_timeout_s, stop_event or threading.Event())
     except FileNotFoundError:
         return False, f"nuclei binary not found at {s.nuclei_bin}"
-    except subprocess.TimeoutExpired:
+    if outcome.interrupted:
+        return False, "interrupted"
+    if outcome.timed_out:
         return False, "template update timed out"
-    tail = "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-20:])
-    return proc.returncode == 0, tail
+    tail = "\n".join(log_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-20:])
+    return outcome.returncode == 0, tail
 
 
 def _first(value: Any) -> Any:

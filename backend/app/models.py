@@ -54,6 +54,11 @@ class Target(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
     last_scanned_at: datetime | None = None
     last_scan_status: str | None = Field(default=None, max_length=16)
+    # Pre-scan reachability probe. UNREACHABLE targets are skipped by the scan and never auto-resolved.
+    reachability: str = Field(default="UNKNOWN", max_length=16)
+    consecutive_probe_failures: int = 0
+    last_probed_at: datetime | None = None
+    last_probe_error: str | None = Field(default=None, max_length=255)
 
 
 class Vulnerability(SQLModel, table=True):
@@ -98,7 +103,10 @@ class ScanRun(SQLModel, table=True):
     severities: str = Field(default="critical,high,medium", max_length=128)
     status: str = Field(default=RunStatus.QUEUED, index=True, max_length=16)
     requested_by: str = Field(default="api", max_length=64)
+    # Times this run has been started. Interrupted runs are re-queued until MAX_RUN_ATTEMPTS.
+    attempts: int = 0
     targets_count: int = 0
+    unreachable_count: int = 0
     findings_count: int = 0
     new_findings: int = 0
     resolved_findings: int = 0

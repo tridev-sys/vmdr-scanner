@@ -48,6 +48,9 @@ def pipeline(tmp_path, monkeypatch):
     # scanner.py binds `engine` at import time, so reload it against the fresh engine.
     import app.services.scanner as scanner
     importlib.reload(scanner)
+    # Hermetic: no real network in pipeline tests. Every probed URL counts as reachable unless a test overrides it.
+    from app.services.probe import ProbeResult
+    monkeypatch.setattr(scanner, "probe_urls", lambda urls: [ProbeResult(u, True, 200) for u in urls])
     yield {"db": db, "scanner": scanner, "emit": emit_flag, "tmp": tmp_path}
     config.get_settings.cache_clear()
 
@@ -156,5 +159,6 @@ def test_orphaned_running_run_is_recovered_on_startup(pipeline):
     assert worker.recover_orphaned_runs() == 1
     with Session(db.engine) as s:
         run = s.get(ScanRun, run_id)
-        assert run.status == RunStatus.FAILED and "interrupted" in run.error
+        # First interruption: re-queued so the scan is not lost.
+        assert run.status == RunStatus.QUEUED and "interrupted" in run.error
     assert worker.recover_orphaned_runs() == 0

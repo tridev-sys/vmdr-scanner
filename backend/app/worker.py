@@ -11,7 +11,6 @@ the same across docker-compose containers (shared volume) and systemd on one hos
 
 import logging
 import signal
-import threading
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,7 +22,9 @@ from app.config import get_settings
 from app.db import engine, init_db
 from app.models import RunScope, RunStatus, ScanRun, WorkerState, WorkerStatus, utcnow
 from app.services import nuclei
-from app.services.scanner import execute_run, log_line, set_worker_state
+from app.services import scanner as scanner_mod
+from app.services.process import kill_stale_group
+from app.services.scanner import MAX_RUN_ATTEMPTS, execute_run, log_line, set_worker_state
 
 logger = logging.getLogger("vmdr.worker")
 
@@ -68,7 +69,12 @@ def run_template_update() -> None:
     with Session(engine) as session:
         set_worker_state(session, status=WorkerStatus.UPDATING_TEMPLATES, template_update_requested=False)
         log_line(session, None, "Updating Nuclei templates")
-        ok, output = nuclei.update_templates()
+        ok, output = nuclei.update_templates(scanner_mod.shutdown_event)
+        if output == "interrupted":
+            # Shutdown during a template sync: not a template failure. Retry after restart.
+            set_worker_state(session, status=WorkerStatus.IDLE, template_update_requested=True)
+            log_line(session, None, "Template update interrupted by shutdown; will retry on next start", "WARN")
+            return
         now = utcnow()
         if ok:
             set_worker_state(
@@ -93,16 +99,27 @@ def _next_queued_run_id() -> int | None:
 
 
 def recover_orphaned_runs() -> int:
-    """Mark runs left RUNNING by a previous worker process as FAILED.
+    """Handle runs left RUNNING by a worker that died without finishing them.
 
-    A RUNNING ALL-scope row would otherwise block every future full scan.
+    A leftover Nuclei process group (pid file in the run's workdir) is killed first. The run is
+    then re-queued, or FAILED once it has used MAX_RUN_ATTEMPTS. A stuck RUNNING row would
+    otherwise block every future full scan.
     """
+    settings = get_settings()
     recovered = 0
     with Session(engine) as session:
         for run in session.exec(select(ScanRun).where(ScanRun.status == RunStatus.RUNNING)).all():
-            run.status = RunStatus.FAILED
-            run.error = "interrupted: worker restarted before the run finished"
-            run.finished_at = utcnow()
+            if kill_stale_group(settings.scan_workdir / f"run-{run.id}" / "nuclei.pid"):
+                log_line(session, run.id, "killed Nuclei left running by the previous worker", "WARN")
+            reason = "interrupted: worker restarted before the run finished"
+            if run.attempts < MAX_RUN_ATTEMPTS:
+                run.status = RunStatus.QUEUED
+                run.started_at = None
+                run.error = f"{reason}; re-queued"
+            else:
+                run.status = RunStatus.FAILED
+                run.error = f"{reason}; gave up after {run.attempts} attempts"
+                run.finished_at = utcnow()
             session.add(run)
             session.commit()
             log_line(session, run.id, run.error, "WARN")
@@ -117,7 +134,9 @@ def main() -> None:
     init_db()
     if recover_orphaned_runs():
         logger.warning("marked orphaned RUNNING run(s) as FAILED")
-    stop = threading.Event()
+    # The handler only sets an event. Every long step (Nuclei, template sync, probes) watches it and
+    # stops promptly, so a deploy or `systemctl stop` finishes well inside the supervisor's grace period.
+    stop = scanner_mod.shutdown_event
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
 
@@ -162,6 +181,8 @@ def main() -> None:
         stop.wait(settings.worker_poll_seconds)
 
     scheduler.shutdown(wait=False)
+    with Session(engine) as session:
+        set_worker_state(session, status=WorkerStatus.IDLE, current_run_id=None)
     logger.info("worker stopped")
 
 

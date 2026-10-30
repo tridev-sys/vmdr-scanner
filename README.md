@@ -48,6 +48,8 @@ docker-compose.yml       web-api, scanner-worker, web-frontend
 - **Findings** are deduplicated on `sha256(target_url | template_id | matcher_name)`. A re-detection updates `last_seen_at` and refreshes the metadata. It never creates a second row.
 - **Resolution:** a finding that is missing from two consecutive *completed* scans of its target is set to `RESOLVED`. A finding seen again is reopened. Failed or timed-out runs never resolve anything. `FALSE_POSITIVE` and `ACCEPTED_RISK` are never changed automatically.
 - **Triage:** `OPEN`, `FALSE_POSITIVE`, `ACCEPTED_RISK`, or `RESOLVED` via `PATCH /api/vulnerabilities/{id}`.
+- **Reachability:** before each scan, every ACTIVE target gets one HTTP probe (5s timeout, concurrent). Any HTTP response counts as reachable, including 4xx/5xx and certificate errors. DNS failures, refused connections, and timeouts count as unreachable. Unreachable targets are skipped, marked `SKIPPED_UNREACHABLE`, counted in `unreachable_count`, and their open findings are never auto-resolved.
+- **Shutdown:** SIGTERM stops an in-progress Nuclei scan within about 10 seconds (its process group gets TERM, then KILL) and re-queues the run. A run is re-queued up to 3 times, then FAILED. A crash inside a run marks it FAILED, so it never stays RUNNING.
 - **Alerts:** a new `critical` or `high` finding triggers every enabled webhook whose threshold it meets.
 
 Scan command (defaults; all configurable):
@@ -87,8 +89,8 @@ docker compose up -d --build
 ```
 
 - The dashboard is at `http://<host>:8080`.
-- Nuclei is baked into the backend image at `NUCLEI_VERSION` (pinned in `.env`). Templates live in the named volume `vmdr-nuclei-templates`, and data (SQLite and scan output) lives in `vmdr-data`. Both survive `docker compose down` and rebuilds; only `docker compose down -v` removes them.
-- Containers share the `vmdr-net` network. Only the frontend publishes a host port.
+- Nuclei is baked into the backend image at `NUCLEI_VERSION` (pinned in `.env`). Volumes are separate on purpose: `vmdr-data` (SQLite and scan output, shared by web-api and scanner-worker) and `vmdr-nuclei-templates` (template cache, worker only). Both survive `docker compose down` and rebuilds; only `docker compose down -v` removes them.
+- Networks are separate on purpose: `vmdr-edge` (frontend ↔ web-api) and `vmdr-egress` (web-api and scanner-worker, which needs outbound access to scan). The frontend cannot reach the worker or the internet. Only the frontend publishes a host port.
 - Seed the initial endpoints once: `docker compose exec web-api python -m app.seed`.
 
 ## Deployment option B: native Ubuntu with systemd
