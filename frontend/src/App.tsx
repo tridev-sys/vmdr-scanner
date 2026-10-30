@@ -1,17 +1,19 @@
 import clsx from "clsx";
-import { KeyRound, LayoutDashboard, Bug, Globe, ShieldCheck } from "lucide-react";
+import { KeyRound, LayoutDashboard, Bug, Globe, ShieldCheck, FileText } from "lucide-react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { getApiKey, setApiKey } from "./lib/api";
 import { useState } from "react";
 import OverviewPage from "./pages/Overview";
 import TargetsPage from "./pages/Targets";
 import VulnerabilitiesPage from "./pages/Vulnerabilities";
+import ReportsPage from "./pages/Reports";
 import { Input } from "./components/ui";
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/targets", label: "Targets", icon: Globe, end: false },
   { to: "/vulnerabilities", label: "Vulnerabilities", icon: Bug, end: false },
+  { to: "/reports", label: "Reports", icon: FileText, end: false },
 ];
 
 function ApiKeyBox() {
@@ -76,6 +78,7 @@ export default function App() {
           <Route path="/" element={<OverviewPage />} />
           <Route path="/targets" element={<TargetsPage />} />
           <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
         </Routes>
       </main>
     </div>

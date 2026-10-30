@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import init_db
-from app.routers import scans, stats, targets, vulnerabilities, webhooks
+from app.routers import reports, scans, stats, targets, vulnerabilities, webhooks
 
 
 @asynccontextmanager
@@ -35,6 +35,6 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-for module in (targets, vulnerabilities, scans, stats, webhooks):
+for module in (targets, vulnerabilities, scans, stats, webhooks, reports):
     api.include_router(module.router)
 app.include_router(api)

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     scan_parallel_chunks: int = 3
     # Newest CVE years are scanned first (0 disables). Templates live under <dir>/**/cves/<year>.
     recent_cve_years: int = 2
+    # Scan reports older than this are deleted by the worker.
+    report_retention_days: int = 5
     nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"
     nuclei_retries: int = 1
     nuclei_timeout: int = 5

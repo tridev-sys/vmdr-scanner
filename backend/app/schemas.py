@@ -129,6 +129,16 @@ class ActiveTarget(BaseModel):
     reachability: str
 
 
+class ReportOut(BaseModel):
+    id: int
+    run_id: int
+    file_name: str
+    size_bytes: int
+    findings_count: int
+    targets_count: int
+    created_at: datetime
+
+
 class LogOut(BaseModel):
     id: int
     run_id: int | None

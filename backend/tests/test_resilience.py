@@ -301,3 +301,47 @@ def test_cancel_with_queued_chunks_stops_quickly_without_starting_more(pipeline,
         assert s.get(ScanRun, run_id).status == RunStatus.CANCELLED
     config.get_settings.cache_clear()
     scanner.shutdown_event.clear()
+
+
+def test_completed_run_writes_downloadable_report_even_without_findings(pipeline, monkeypatch):
+    from sqlmodel import Session, select
+    from app.models import Report, RunStatus, ScanRun
+    from app.services.targets import add_targets
+
+    db, scanner = pipeline["db"], pipeline["scanner"]
+    with Session(db.engine) as s:
+        add_targets(s, urls=["https://kai.buckleconsult.com"])
+    monkeypatch.setenv("FAKE_EMIT_FLAG", str(pipeline["tmp"] / "no-emit"))  # nuclei reports nothing
+    run_id = _queue_run(db)
+    scanner.execute_run(run_id)
+    with Session(db.engine) as s:
+        assert s.get(ScanRun, run_id).status == RunStatus.COMPLETED
+        report = s.exec(select(Report).where(Report.run_id == run_id)).one()
+        assert report.findings_count == 0 and report.targets_count == 1
+        import json
+        from app.services.reports import reports_dir
+        payload = json.loads((reports_dir() / report.file_name).read_text())
+        assert payload["summary"]["findings_total"] == 0
+        assert payload["run"]["id"] == run_id and payload["retention_days"] == 5
+        assert payload["targets"][0]["result"] == "CLEAN"
+
+
+def test_purge_removes_reports_older_than_retention(pipeline):
+    from datetime import timedelta
+    from sqlmodel import Session, select
+    from app.models import Report
+    from app.services.reports import purge_expired, reports_dir
+    from app.models import utcnow
+
+    db = pipeline["db"]
+    old_file = reports_dir() / "old.json"
+    new_file = reports_dir() / "new.json"
+    old_file.write_text("{}")
+    new_file.write_text("{}")
+    with Session(db.engine) as s:
+        s.add(Report(run_id=1, file_name="old.json", created_at=utcnow() - timedelta(days=6)))
+        s.add(Report(run_id=2, file_name="new.json", created_at=utcnow() - timedelta(days=4)))
+        s.commit()
+        assert purge_expired(s) == 1
+        left = [r.file_name for r in s.exec(select(Report)).all()]
+    assert left == ["new.json"] and not old_file.exists() and new_file.exists()

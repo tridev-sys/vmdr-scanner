@@ -11,6 +11,7 @@ the same across docker-compose containers (shared volume) and systemd on one hos
 
 import logging
 import signal
+import time
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -162,7 +163,18 @@ def main() -> None:
     logger.info("worker started; full scan cron=%r, template sync every %sh",
                 settings.full_scan_cron, settings.template_update_hours)
 
+    last_purge = 0.0
     while not stop.is_set():
+        if time.monotonic() - last_purge > 3600:
+            last_purge = time.monotonic()
+            try:
+                from app.services.reports import purge_expired
+                with Session(engine) as session:
+                    removed = purge_expired(session)
+                if removed:
+                    logger.info("purged %s expired report(s)", removed)
+            except Exception:
+                logger.exception("report purge failed")
         try:
             with Session(engine) as session:
                 state = session.get(WorkerState, 1)

@@ -238,6 +238,40 @@ export const api = {
   del: (path: string) => request<void>("DELETE", path),
 };
 
+/** One row of GET /api/reports. Reports are written for every completed scan and expire after 5 days. */
+export interface ReportItem {
+  id: number;
+  run_id: number;
+  file_name: string;
+  size_bytes: number;
+  findings_count: number;
+  targets_count: number;
+  created_at: string;
+}
+
+export function listReports(limit = 50): Promise<ReportItem[]> {
+  return api.get<ReportItem[]>(`/reports?limit=${limit}`);
+}
+
+/** Same-origin path for the report JSON attachment (use as a plain anchor href). */
+export function reportDownloadUrl(id: number): string {
+  return `/api/reports/${id}/download`;
+}
+
+/**
+ * Returns false only when the report has expired (HTTP 410). The response body is cancelled
+ * so the file is not actually transferred. Network errors count as available.
+ */
+export async function reportAvailable(id: number): Promise<boolean> {
+  try {
+    const res = await fetch(reportDownloadUrl(id));
+    res.body?.cancel().catch(() => undefined);
+    return res.status !== 410;
+  } catch {
+    return true;
+  }
+}
+
 export function getLiveScanStatus(): Promise<LiveScanStatus> {
   return api.get<LiveScanStatus>("/scans/status");
 }

@@ -337,6 +337,16 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
         "INFO" if ok else "WARN",
     )
 
+    if ok:
+        # A report is written for every completed run, even when nothing was found.
+        try:
+            from app.services.reports import write_report
+            report = write_report(session, session.get(ScanRun, run_id))
+            log_line(session, run_id, f"Report ready: {report.file_name} ({report.findings_count} findings)")
+        except Exception as exc:  # a report failure must never fail the scan
+            logger.exception("report generation failed for run %s", run_id)
+            log_line(session, run_id, f"report generation failed: {exc}", "WARN")
+
     if stats.alerts:
         for err in dispatch_alerts(session, stats.alerts):
             log_line(session, run_id, f"alert delivery: {err}", "WARN")

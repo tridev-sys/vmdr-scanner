@@ -159,6 +159,20 @@ class WorkerState(SQLModel, table=True):
     template_update_requested: bool = False
 
 
+class Report(SQLModel, table=True):
+    """Metadata for a scan report. The JSON file lives in the scan workdir under reports/."""
+
+    __tablename__ = "reports"
+
+    id: int | None = Field(default=None, primary_key=True)
+    run_id: int = Field(index=True)
+    file_name: str = Field(max_length=255)
+    size_bytes: int = 0
+    findings_count: int = 0
+    targets_count: int = 0
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
 class WebhookConfig(SQLModel, table=True):
     __tablename__ = "webhooks"
 
