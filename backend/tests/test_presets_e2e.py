@@ -33,6 +33,8 @@ def _setup(pipeline, monkeypatch):
     payloads.mkdir(parents=True)
     (payloads / "reflected.yaml").write_text("id: reflected\n")
     monkeypatch.setenv("VMDR_PAYLOAD_TEMPLATES_DIR", str(tmp / "payload-templates"))
+    # Discovery finds one parameterized URL per target, so the payload pass has input to fuzz.
+    monkeypatch.setattr(pipeline["scanner"], "discover", lambda url, **kwargs: [url.rstrip("/") + "/search?q=1"])
     monkeypatch.setenv("REC_LOG", str(tmp / "rec.log"))
     config.get_settings.cache_clear()
     with Session(pipeline["db"].engine) as s:
@@ -81,6 +83,7 @@ def test_quick_preset_reaches_scanner_with_window_and_rate(pipeline, monkeypatch
     assert "-dast" not in window and "-dast" not in generic
     # Payload pass: DAST mode, only the vendored payload directory.
     assert "-dast" in payload
+    assert payload[payload.index("-list") + 1].endswith("payload_targets_000.txt")  # discovered URLs, not base URLs
     assert payload[payload.index("-t") + 1].endswith("payload-templates")
     assert payload.count("-t") == 1
 

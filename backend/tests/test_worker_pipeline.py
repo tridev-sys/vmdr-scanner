@@ -51,6 +51,8 @@ def pipeline(tmp_path, monkeypatch):
     # Hermetic: no real network in pipeline tests. Every probed URL counts as reachable unless a test overrides it.
     from app.services.probe import ProbeResult
     monkeypatch.setattr(scanner, "probe_urls", lambda urls: [ProbeResult(u, True, 200) for u in urls])
+    # No crawling either: discovery finds nothing unless a test provides parameterized URLs.
+    monkeypatch.setattr(scanner, "discover", lambda url, **kwargs: [])
     yield {"db": db, "scanner": scanner, "emit": emit_flag, "tmp": tmp_path}
     config.get_settings.cache_clear()
 

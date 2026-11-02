@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.db import engine
 from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStatus, WorkerState, WorkerStatus, utcnow
+from app.services.discovery import discover
 from app.services.ingest import ingest
 from app.services.nuclei import (
     all_cve_dirs, build_command, generic_template_dirs, parse_jsonl, payload_template_dirs, recent_cve_dirs,
@@ -81,6 +82,23 @@ def _select_targets(session: Session, run: ScanRun) -> list[Target]:
     return list(session.exec(
         select(Target).where(Target.status == TargetStatus.ACTIVE).order_by(Target.id)
     ).all())
+
+
+def _discover_targets(targets, cancelled) -> dict[int, list[str]]:
+    """Parameterized URLs per target, crawled in parallel. Stops early on cancel or shutdown."""
+    settings = get_settings()
+
+    def work(target):
+        if cancelled() or shutdown_event.is_set():
+            return target.id, []
+        return target.id, discover(
+            target.url, max_pages=settings.discovery_max_pages, max_urls=settings.discovery_max_urls)
+
+    results: dict[int, list[str]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, settings.discovery_workers)) as pool:
+        for target_id, urls in pool.map(work, targets):
+            results[target_id] = urls
+    return results
 
 
 def _probe_and_split(session: Session, target_ids: list[int]) -> tuple[list[int], list[str]]:
@@ -253,15 +271,32 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
     spec = [(*entry, False) if len(entry) == 3 else entry for entry in spec]
     severities = run.severities.split(",")
 
+    # Discovery: parameterized URLs from each target's own pages. Only the payload pass fuzzes them.
+    discovered: dict[int, list[str]] = {}
+    if settings.discovery_enabled and any(entry[3] for entry in spec):
+        discovered = _discover_targets(targets, lambda: _cancel_requested(run_id))
+        total = sum(len(urls) for urls in discovered.values())
+        with_params = sum(1 for urls in discovered.values() if urls)
+        log_line(session, run_id, f"Discovery: {total} parameterized URL(s) on {with_params} of {len(targets)} target(s)")
+
     jobs = []
     for index, chunk in enumerate(chunks):
         targets_file = workdir / f"targets_{index:03d}.txt"
         targets_file.write_text("\n".join(t.url for t in chunk) + "\n", encoding="utf-8")
+        payload_urls = [url for t in chunk for url in discovered.get(t.id, [])]
+        payload_file = workdir / f"payload_targets_{index:03d}.txt"
+        payload_file.write_text("\n".join(payload_urls) + "\n", encoding="utf-8")
         passes = []
         for label, templates, exclude, dast in spec:
+            if dast:
+                if not payload_urls:
+                    continue  # nothing with parameters to fuzz in this chunk
+                input_file = payload_file
+            else:
+                input_file = targets_file
             output = workdir / f"output_{index:03d}_{label}.jsonl"
             output.unlink(missing_ok=True)
-            cmd = build_command(targets_file, output, severities, templates=templates, exclude=exclude,
+            cmd = build_command(input_file, output, severities, templates=templates, exclude=exclude,
                                 rate_limit=run.rate_limit, dast=dast)
             passes.append((cmd, output, workdir / f"nuclei_{index:03d}_{label}.log",
                            workdir / f"nuclei_{index:03d}_{label}.pid"))

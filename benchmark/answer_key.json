@@ -1,0 +1,593 @@
+{
+  "version": 1,
+  "flaws": [
+    {
+      "id": "sqli-q",
+      "cls": "sqli",
+      "path": "/bm/sqli/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "sqli-id",
+      "cls": "sqli",
+      "path": "/bm/sqli/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "sqli-search",
+      "cls": "sqli",
+      "path": "/bm/sqli/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "sqli-file",
+      "cls": "sqli",
+      "path": "/bm/sqli/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "sqli-name",
+      "cls": "sqli",
+      "path": "/bm/sqli/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "sqli-url",
+      "cls": "sqli",
+      "path": "/bm/sqli/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "sqli-host",
+      "cls": "sqli",
+      "path": "/bm/sqli/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "sqli-page",
+      "cls": "sqli",
+      "path": "/bm/sqli/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "sqli-path",
+      "cls": "sqli",
+      "path": "/bm/sqli/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "sqli-input",
+      "cls": "sqli",
+      "path": "/bm/sqli/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "sqli-data",
+      "cls": "sqli",
+      "path": "/bm/sqli/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "sqli-ref",
+      "cls": "sqli",
+      "path": "/bm/sqli/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "xss-q",
+      "cls": "xss",
+      "path": "/bm/xss/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "xss-id",
+      "cls": "xss",
+      "path": "/bm/xss/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "xss-search",
+      "cls": "xss",
+      "path": "/bm/xss/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "xss-file",
+      "cls": "xss",
+      "path": "/bm/xss/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "xss-name",
+      "cls": "xss",
+      "path": "/bm/xss/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "xss-url",
+      "cls": "xss",
+      "path": "/bm/xss/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "xss-host",
+      "cls": "xss",
+      "path": "/bm/xss/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "xss-page",
+      "cls": "xss",
+      "path": "/bm/xss/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "xss-path",
+      "cls": "xss",
+      "path": "/bm/xss/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "xss-input",
+      "cls": "xss",
+      "path": "/bm/xss/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "xss-data",
+      "cls": "xss",
+      "path": "/bm/xss/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "xss-ref",
+      "cls": "xss",
+      "path": "/bm/xss/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "ssti-q",
+      "cls": "ssti",
+      "path": "/bm/ssti/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "ssti-id",
+      "cls": "ssti",
+      "path": "/bm/ssti/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "ssti-search",
+      "cls": "ssti",
+      "path": "/bm/ssti/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "ssti-file",
+      "cls": "ssti",
+      "path": "/bm/ssti/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "ssti-name",
+      "cls": "ssti",
+      "path": "/bm/ssti/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "ssti-url",
+      "cls": "ssti",
+      "path": "/bm/ssti/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "ssti-host",
+      "cls": "ssti",
+      "path": "/bm/ssti/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "ssti-page",
+      "cls": "ssti",
+      "path": "/bm/ssti/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "ssti-path",
+      "cls": "ssti",
+      "path": "/bm/ssti/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "ssti-input",
+      "cls": "ssti",
+      "path": "/bm/ssti/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "ssti-data",
+      "cls": "ssti",
+      "path": "/bm/ssti/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "ssti-ref",
+      "cls": "ssti",
+      "path": "/bm/ssti/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "lfi-q",
+      "cls": "lfi",
+      "path": "/bm/lfi/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "lfi-id",
+      "cls": "lfi",
+      "path": "/bm/lfi/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "lfi-search",
+      "cls": "lfi",
+      "path": "/bm/lfi/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "lfi-file",
+      "cls": "lfi",
+      "path": "/bm/lfi/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "lfi-name",
+      "cls": "lfi",
+      "path": "/bm/lfi/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "lfi-url",
+      "cls": "lfi",
+      "path": "/bm/lfi/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "lfi-host",
+      "cls": "lfi",
+      "path": "/bm/lfi/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "lfi-page",
+      "cls": "lfi",
+      "path": "/bm/lfi/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "lfi-path",
+      "cls": "lfi",
+      "path": "/bm/lfi/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "lfi-input",
+      "cls": "lfi",
+      "path": "/bm/lfi/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "lfi-data",
+      "cls": "lfi",
+      "path": "/bm/lfi/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "lfi-ref",
+      "cls": "lfi",
+      "path": "/bm/lfi/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "rce-q",
+      "cls": "rce",
+      "path": "/bm/rce/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "rce-id",
+      "cls": "rce",
+      "path": "/bm/rce/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "rce-search",
+      "cls": "rce",
+      "path": "/bm/rce/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "rce-file",
+      "cls": "rce",
+      "path": "/bm/rce/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "rce-name",
+      "cls": "rce",
+      "path": "/bm/rce/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "rce-url",
+      "cls": "rce",
+      "path": "/bm/rce/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "rce-host",
+      "cls": "rce",
+      "path": "/bm/rce/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "rce-page",
+      "cls": "rce",
+      "path": "/bm/rce/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "rce-path",
+      "cls": "rce",
+      "path": "/bm/rce/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "rce-input",
+      "cls": "rce",
+      "path": "/bm/rce/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "rce-data",
+      "cls": "rce",
+      "path": "/bm/rce/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "rce-ref",
+      "cls": "rce",
+      "path": "/bm/rce/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-q",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/0",
+      "param": "q",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-id",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/1",
+      "param": "id",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-search",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/2",
+      "param": "search",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-file",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/3",
+      "param": "file",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-name",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/4",
+      "param": "name",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-url",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/5",
+      "param": "url",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-host",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/6",
+      "param": "host",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-page",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/7",
+      "param": "page",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-path",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/8",
+      "param": "path",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-input",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/9",
+      "param": "input",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-data",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/10",
+      "param": "data",
+      "location": "query"
+    },
+    {
+      "id": "ssrf-ref",
+      "cls": "ssrf",
+      "path": "/bm/ssrf/11",
+      "param": "ref",
+      "location": "query"
+    },
+    {
+      "id": "idor-0",
+      "cls": "idor",
+      "path": "/bm/idor/0",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "idor-1",
+      "cls": "idor",
+      "path": "/bm/idor/1",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "idor-2",
+      "cls": "idor",
+      "path": "/bm/idor/2",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "idor-3",
+      "cls": "idor",
+      "path": "/bm/idor/3",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "idor-4",
+      "cls": "idor",
+      "path": "/bm/idor/4",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "idor-5",
+      "cls": "idor",
+      "path": "/bm/idor/5",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-0",
+      "cls": "exposure",
+      "path": "/bm/exposure/0",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-1",
+      "cls": "exposure",
+      "path": "/bm/exposure/1",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-2",
+      "cls": "exposure",
+      "path": "/bm/exposure/2",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-3",
+      "cls": "exposure",
+      "path": "/bm/exposure/3",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-4",
+      "cls": "exposure",
+      "path": "/bm/exposure/4",
+      "param": null,
+      "location": "path"
+    },
+    {
+      "id": "exposure-5",
+      "cls": "exposure",
+      "path": "/bm/exposure/5",
+      "param": null,
+      "location": "path"
+    }
+  ]
+}

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     nuclei_templates_dir: str = "/home/vmdr/nuclei-templates"
     # Vendored payload-injecting DAST templates (see backend/payload-templates/PIN.txt).
     payload_templates_dir: str = "/opt/vmdr/payload-templates"
+    # Endpoint discovery for the payload pass: crawl each target's own pages for parameterized URLs.
+    discovery_enabled: bool = True
+    discovery_max_pages: int = 15
+    discovery_max_urls: int = 50
+    discovery_workers: int = 10
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
     nuclei_severities: str = "critical,high,medium"

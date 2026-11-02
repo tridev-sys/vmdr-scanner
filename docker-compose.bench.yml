@@ -1,0 +1,98 @@
+# VMDR benchmark stack: an isolated copy of the live stack for measuring detection (see benchmark/).
+# Runs beside the live stack on the same host without sharing anything with it:
+#   own project name (vmdr-bench), own networks, own volumes, own image tag, own frontend port (8090).
+# The benchmark target app is reached by its compose service name, not a public IP.
+#
+# Start:  docker compose -f docker-compose.bench.yml -p vmdr-bench up -d --build
+# Stop:   docker compose -f docker-compose.bench.yml -p vmdr-bench stop        (never `down -v`)
+name: vmdr-bench
+
+services:
+  bench-target:
+    build: ./benchmark
+    image: vmdr-bench-target
+    networks: [vmdr-bench-egress]
+    restart: unless-stopped
+
+  web-api:
+    build:
+      context: ./backend
+      args: {NUCLEI_VERSION: "${NUCLEI_VERSION}"}
+    image: vmdr-bench-backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    env_file: .env
+    environment:
+      VMDR_DATABASE_URL: "postgresql+psycopg://${VMDR_PG_USER}:${VMDR_PG_PASSWORD}@postgres:5432/${VMDR_PG_DB}"
+    volumes:
+      - vmdr-bench-data:/data
+    networks: [vmdr-bench-edge, vmdr-bench-egress]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  scanner-worker:
+    build:
+      context: ./backend
+      args: {NUCLEI_VERSION: "${NUCLEI_VERSION}"}
+    image: vmdr-bench-backend
+    command: ["python", "-m", "app.worker"]
+    env_file: .env
+    environment:
+      VMDR_DATABASE_URL: "postgresql+psycopg://${VMDR_PG_USER}:${VMDR_PG_PASSWORD}@postgres:5432/${VMDR_PG_DB}"
+    volumes:
+      - vmdr-bench-data:/data
+      - vmdr-bench-nuclei-templates:/home/vmdr/nuclei-templates
+    networks: [vmdr-bench-egress]
+    depends_on:
+      web-api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "${VMDR_PG_DB}"
+      POSTGRES_USER: "${VMDR_PG_USER}"
+      POSTGRES_PASSWORD: "${VMDR_PG_PASSWORD}"
+    volumes:
+      - vmdr-bench-pgdata:/var/lib/postgresql/data
+    networks: [vmdr-bench-egress]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web-frontend:
+    build: ./frontend
+    ports:
+      - "8090:80"
+    networks: [vmdr-bench-edge]
+    depends_on: [web-api]
+    restart: unless-stopped
+
+# Networks: nothing shared with the live stack (vmdr-edge, vmdr-egress).
+networks:
+  vmdr-bench-edge:
+    name: vmdr-bench-edge
+  vmdr-bench-egress:
+    name: vmdr-bench-egress
+
+# Volumes: nothing shared with the live stack (vmdr-data, vmdr-pgdata, vmdr-nuclei-templates).
+volumes:
+  vmdr-bench-data:
+    name: vmdr-bench-data
+  vmdr-bench-pgdata:
+    name: vmdr-bench-pgdata
+  vmdr-bench-nuclei-templates:
+    name: vmdr-bench-nuclei-templates
