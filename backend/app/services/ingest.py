@@ -10,7 +10,7 @@ from sqlmodel import Session, col, select
 from app.config import get_settings
 from app.models import Target, Vulnerability, VulnStatus, utcnow
 from app.services.nuclei import Finding, match_target_host
-from app.utils import fingerprint, normalize_target_url
+from app.utils import endpoint_key, fingerprint, normalize_target_url
 
 # SQLite caps bound parameters per statement, so IN lists are split into chunks of this size.
 IN_CHUNK = 500
@@ -93,7 +93,7 @@ def ingest(
             stats.unmatched += 1
             continue
         stats.findings_total += 1
-        fp = fingerprint(target.url, f.template_id, f.matcher_name)
+        fp = fingerprint(target.url, f.template_id, f.matcher_name, endpoint_key(f.matched_at))
         seen[target.id].add(fp)
         matched.append((target, f, fp))
 

@@ -1,6 +1,6 @@
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 SEVERITIES = ("critical", "high", "medium", "low", "info", "unknown")
 SEVERITY_RANK = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1, "unknown": 0}
@@ -46,8 +46,24 @@ def infer_tags(host: str) -> list[str]:
     return tags
 
 
-def fingerprint(target_url: str, template_id: str, matcher_name: str | None) -> str:
+def endpoint_key(matched_at: str | None) -> str:
+    """Endpoint identity for dedup: scheme, host, path, and sorted parameter NAMES.
+
+    Parameter values are left out, so the same endpoint with a different payload is still one finding.
+    Different paths or parameter names are different findings.
+    """
+    if not matched_at:
+        return ""
+    parts = urlsplit(matched_at)
+    names = sorted({name for name, _ in parse_qsl(parts.query, keep_blank_values=True)})
+    return f"{parts.scheme}://{parts.netloc}{parts.path}?{','.join(names)}"
+
+
+def fingerprint(target_url: str, template_id: str, matcher_name: str | None, endpoint: str = "") -> str:
+    """One finding per target, template, matcher, and (when given) endpoint. Empty endpoint keeps the old key."""
     raw = f"{target_url}|{template_id}|{matcher_name or ''}"
+    if endpoint:
+        raw += f"|{endpoint}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

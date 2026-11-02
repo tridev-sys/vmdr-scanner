@@ -181,3 +181,18 @@ def test_partial_run_never_counts_misses(tmp_path):
         assert stats.resolved == 0
     (row,) = _rows(engine).values()
     assert row.status == VulnStatus.OPEN and row.missed_scans == 0
+
+
+def test_one_template_on_many_endpoints_makes_many_findings(tmp_path):
+    """Dedup is per endpoint: the same template on three paths of one target is three findings, not one."""
+    engine = _engine(tmp_path / "endpoints.db")
+    findings = [
+        Finding(
+            template_id="reflection-ssti", cve_id=None, name="SSTI", severity="medium", host=HOSTS[0],
+            matched_at=f"{HOSTS[0]}/bm/ssti/{n}?input=x", matcher_name=None, curl_command=None,
+            description=None, remediation=None, cvss_score=None,
+        )
+        for n in range(3)
+    ]
+    _run(engine, findings)
+    assert len(_rows(engine)) == 3

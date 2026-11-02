@@ -2,6 +2,7 @@ import pytest
 
 from app.utils import (
     domain_root,
+    endpoint_key,
     fingerprint,
     infer_tags,
     normalize_target_url,
@@ -54,3 +55,21 @@ https://b.koala.cx , prod;middleware
         ("https://a.koala.cx", []),
         ("https://b.koala.cx", ["prod", "middleware"]),
     ]
+
+
+def test_endpoint_key_ignores_values_but_not_path_or_param_names():
+    from app.utils import endpoint_key
+    a = endpoint_key("http://h:9090/bm/sqli/0?q=1%27")
+    assert a == endpoint_key("http://h:9090/bm/sqli/0?q=admin+or+1%3D1")  # same endpoint, other payload
+    assert a != endpoint_key("http://h:9090/bm/sqli/1?q=1")  # other path
+    assert a != endpoint_key("http://h:9090/bm/sqli/0?id=1")  # other parameter name
+    assert endpoint_key("") == ""
+
+
+def test_endpoint_makes_one_template_many_findings():
+    from app.utils import endpoint_key
+    base = fingerprint("http://h:9090", "reflection-ssti", "m")
+    assert base == fingerprint("http://h:9090", "reflection-ssti", "m", "")  # old key unchanged
+    fp1 = fingerprint("http://h:9090", "reflection-ssti", "m", endpoint_key("http://h:9090/bm/ssti/1?q=x"))
+    fp2 = fingerprint("http://h:9090", "reflection-ssti", "m", endpoint_key("http://h:9090/bm/ssti/2?q=x"))
+    assert fp1 != fp2 and fp1 != base
