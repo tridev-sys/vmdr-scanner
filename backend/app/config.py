@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # Endpoint discovery for the payload pass: crawl each target's own pages for parameterized URLs.
     discovery_enabled: bool = True
     discovery_max_pages: int = 15
-    discovery_max_urls: int = 50
+    discovery_max_urls: int = 500
     discovery_workers: int = 10
     nuclei_retries: int = 1
     nuclei_timeout: int = 5
