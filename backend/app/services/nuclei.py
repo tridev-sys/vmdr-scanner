@@ -52,6 +52,15 @@ def payload_template_dirs(root: Path) -> list[str]:
     return [str(root)] if root.is_dir() and any(root.rglob("*.yaml")) else []
 
 
+# Official DAST templates (payload-injecting, fuzzing blocks) for the classes the generic checks miss.
+# They live in the official tree under dast/, which the daily sync keeps current.
+OFFICIAL_DAST_DIRS = ("dast/vulnerabilities/sqli", "dast/vulnerabilities/cmdi", "dast/vulnerabilities/ssrf")
+
+
+def official_dast_dirs(root: Path) -> list[str]:
+    return [str(root / d) for d in OFFICIAL_DAST_DIRS if (root / d).is_dir()]
+
+
 def all_cve_dirs(root: Path) -> list[str]:
     """Every year-named CVE template directory, for excluding CVE templates from a pass."""
     if not root.is_dir():

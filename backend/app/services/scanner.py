@@ -20,7 +20,8 @@ from app.models import RunScope, RunStatus, ScanLog, ScanRun, Target, TargetStat
 from app.services.discovery import discover
 from app.services.ingest import ingest
 from app.services.nuclei import (
-    all_cve_dirs, build_command, generic_template_dirs, parse_jsonl, payload_template_dirs, recent_cve_dirs,
+    all_cve_dirs, build_command, generic_template_dirs, official_dast_dirs, parse_jsonl, payload_template_dirs,
+    recent_cve_dirs,
 )
 from app.services.probe import probe_urls
 from app.services.process import ProcessOutcome, run_process
@@ -265,7 +266,7 @@ def _execute_started(session: Session, run_id: int, target_ids: list[int], setti
             log_line(session, run_id, f"Recent-first: {len(recent_dirs)} template dir(s) run before the rest")
         spec = ([("recent", recent_dirs, None)] if recent_dirs else []) + [("rest", None, recent_dirs)]
     # Payload DAST pass (last): fuzzes query parameters with attack payloads. Runs in every preset.
-    payload_dirs = payload_template_dirs(Path(settings.payload_templates_dir))
+    payload_dirs = payload_template_dirs(Path(settings.payload_templates_dir)) + official_dast_dirs(root)
     if payload_dirs:
         spec.append(("payload", payload_dirs, None, True))
     spec = [(*entry, False) if len(entry) == 3 else entry for entry in spec]

@@ -53,3 +53,10 @@ def test_vendored_payload_set_is_complete_and_pinned():
     # Every vendored template must declare DAST fuzzing, or -dast would skip it silently.
     for path in root.rglob("*.yaml"):
         assert "fuzzing:" in path.read_text(), f"{path.name} has no fuzzing block"
+
+
+def test_official_dast_dirs_only_existing(tmp_path):
+    from app.services.nuclei import official_dast_dirs
+    assert official_dast_dirs(tmp_path) == []
+    (tmp_path / "dast/vulnerabilities/sqli").mkdir(parents=True)
+    assert official_dast_dirs(tmp_path) == [str(tmp_path / "dast/vulnerabilities/sqli")]
